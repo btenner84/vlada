@@ -135,7 +135,7 @@ export default function BillAnalysis() {
       });
 
       // Always use a relative URL for API calls
-      const apiUrl = `${window.location.origin}/api/analyze`;
+      const apiUrl = `${window.location.origin}/api/analyze-proxy`;
       console.log(`Calling API at ${apiUrl}`);
       console.log('Current hostname:', window.location.hostname);
       console.log('Current origin:', window.location.origin);
