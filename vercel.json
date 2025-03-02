@@ -12,5 +12,16 @@
         { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version" }
       ]
     }
+  ],
+  "routes": [
+    {
+      "src": "/api/analyze",
+      "methods": ["POST", "OPTIONS"],
+      "dest": "/api/analyze"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
   ]
 } 
