@@ -60,6 +60,16 @@ export default function BillAnalysis() {
       const data = { ...billDoc.data(), id };
       setBillData(data);
       
+      // Test the API endpoint
+      try {
+        console.log('Testing API endpoint...');
+        const testResponse = await fetch('/api/test');
+        const testData = await testResponse.json();
+        console.log('Test API response:', testData);
+      } catch (testError) {
+        console.error('Test API error:', testError);
+      }
+      
       // Start extraction if not already done
       if (!data.extractedData) {
         startDataExtraction(data, currentUser);
@@ -117,19 +127,26 @@ export default function BillAnalysis() {
       // Always use a relative URL for API calls
       const apiUrl = '/api/analyze';
       console.log(`Calling API at ${apiUrl}`);
+      console.log('Current hostname:', window.location.hostname);
+      console.log('Current origin:', window.location.origin);
+      console.log('Current pathname:', window.location.pathname);
       
       try {
+        // Log the request details
+        const requestBody = {
+          billId: billData.id,
+          fileUrl: billData.fileUrl,
+          userId: currentUser.uid
+        };
+        console.log('Request body:', JSON.stringify(requestBody));
+        
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
-          body: JSON.stringify({
-            billId: billData.id,
-            fileUrl: billData.fileUrl,
-            userId: currentUser.uid
-          })
+          body: JSON.stringify(requestBody)
         });
         
         console.log('Response status:', response.status);
