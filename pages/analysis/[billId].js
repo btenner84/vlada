@@ -135,7 +135,7 @@ export default function BillAnalysis() {
       });
 
       // Always use a relative URL for API calls
-      const apiUrl = `${window.location.origin}/api/analyze-simple`;
+      const apiUrl = `${window.location.origin}/api/analyze-full`;
       console.log(`Calling API at ${apiUrl}`);
       console.log('Current hostname:', window.location.hostname);
       console.log('Current origin:', window.location.origin);
@@ -219,6 +219,7 @@ export default function BillAnalysis() {
         // Use the parsed data if available, otherwise use the original response.json()
         const result = data || await response.json();
         
+        // Use the actual response from the API
         setExtractedData(result);
         setIsMedicalBill(result.isMedicalBill);
         
