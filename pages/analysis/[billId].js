@@ -169,7 +169,9 @@ export default function BillAnalysis() {
           userId: currentUser.uid
         };
         console.log('Request body:', JSON.stringify(requestBody));
+        console.log('API URL:', apiUrl);
         
+        // Add more detailed error handling
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
@@ -180,31 +182,45 @@ export default function BillAnalysis() {
         });
         
         console.log('Response status:', response.status);
-        const contentType = response.headers.get('content-type');
-        console.log('Response content-type:', contentType);
-
-        let data;
+        console.log('Response status text:', response.statusText);
+        
+        // Try to get response headers
+        const responseHeaders = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[key] = value;
+        });
+        console.log('Response headers:', JSON.stringify(responseHeaders));
+        
+        // Try to get response text even if it's not JSON
+        let responseText;
         try {
-          const text = await response.text();
-          console.log('Raw response:', text);
-          
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}, body: ${text}`);
-          }
-
-          try {
-            data = JSON.parse(text);
-          } catch (parseError) {
-            console.error('Failed to parse response as JSON:', text);
-            throw new Error('Invalid JSON response from server');
-          }
-        } catch (error) {
-          console.error('API request failed:', error);
-          throw error;
+          responseText = await response.text();
+          console.log('Response text:', responseText);
+        } catch (textError) {
+          console.error('Error getting response text:', textError);
         }
-
-        setExtractedData(data);
-        setIsMedicalBill(data.isMedicalBill);
+        
+        // Parse JSON if possible
+        let data;
+        if (responseText) {
+          try {
+            data = JSON.parse(responseText);
+            console.log('Response data:', data);
+          } catch (jsonError) {
+            console.error('Error parsing JSON:', jsonError);
+            // Continue with the text response
+          }
+        }
+        
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status} ${response.statusText} - ${responseText || 'No response body'}`);
+        }
+        
+        // Use the parsed data if available, otherwise use the original response.json()
+        const result = data || await response.json();
+        
+        setExtractedData(result);
+        setIsMedicalBill(result.isMedicalBill);
         
         // Get the raw extracted text from Firestore
         const docRef = doc(db, 'bills', billData.id);

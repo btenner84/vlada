@@ -86,60 +86,70 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
 };
 
 export default async function handler(req, res) {
-  // Add CORS headers
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
-
-  // Handle preflight request
+  console.log('API Route: /api/analyze - Request received');
+  console.log('Request Method:', req.method);
+  console.log('Request Headers:', JSON.stringify(req.headers));
+  console.log('Request URL:', req.url);
+  console.log('Request Query:', JSON.stringify(req.query));
+  
+  // Handle CORS preflight request
   if (req.method === 'OPTIONS') {
+    console.log('Handling OPTIONS request for CORS preflight');
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    );
     res.status(200).end();
+    console.log('OPTIONS request handled successfully');
     return;
   }
+  
+  // Continue with your existing code for POST requests
+  if (req.method === 'POST') {
+    // Log request details for debugging
+    console.log('Handling POST request');
+    console.log('Request Body:', JSON.stringify(req.body));
 
-  // Log request details for debugging
-  console.log('API Route Handler - Request Method:', req.method);
-  console.log('API Route Handler - Request Headers:', JSON.stringify(req.headers));
-  console.log('API Route Handler - Request Body:', JSON.stringify(req.body));
+    try {
+      const { fileUrl, userId, billId } = req.body;
+      console.log('Extracted parameters:', { fileUrl, userId, billId });
 
-  if (req.method !== 'POST') {
-    console.log('API Route Handler - Method not allowed:', req.method);
-    return res.status(405).json({ 
-      error: 'Method not allowed',
-      allowedMethod: 'POST',
-      receivedMethod: req.method
-    });
-  }
+      if (!fileUrl || !userId || !billId) {
+        console.log('Missing required parameters:', { fileUrl: !!fileUrl, userId: !!userId, billId: !!billId });
+        return res.status(400).json({ 
+          error: 'Missing required parameters',
+          details: { fileUrl: !!fileUrl, userId: !!userId, billId: !!billId }
+        });
+      }
 
-  try {
-    const { fileUrl, userId, billId } = req.body;
+      // Verify ownership
+      console.log('Verifying document ownership');
+      const billDoc = await adminDb.collection('bills').doc(billId).get();
+      if (!billDoc.exists || billDoc.data().userId !== userId) {
+        console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
+        return res.status(403).json({ error: 'Unauthorized access to this document' });
+      }
 
-    if (!fileUrl || !userId || !billId) {
-      return res.status(400).json({ 
-        error: 'Missing required parameters',
-        details: { fileUrl: !!fileUrl, userId: !!userId, billId: !!billId }
+      console.log('Starting document analysis');
+      const result = await analyzeDocument(fileUrl, userId, billId);
+      console.log('Analysis completed successfully');
+      return res.status(200).json(result);
+
+    } catch (error) {
+      console.error('Handler error:', error);
+      return res.status(500).json({
+        error: error.message || 'Analysis failed',
+        details: error.toString(),
+        step: 'bill_verification'
       });
     }
-
-    // Verify ownership
-    const billDoc = await adminDb.collection('bills').doc(billId).get();
-    if (!billDoc.exists || billDoc.data().userId !== userId) {
-      return res.status(403).json({ error: 'Unauthorized access to this document' });
-    }
-
-    const result = await analyzeDocument(fileUrl, userId, billId);
-    return res.status(200).json(result);
-
-  } catch (error) {
-    console.error('Handler error:', error);
-    return res.status(500).json({
-      error: error.message || 'Analysis failed',
-      details: error.toString(),
-      step: 'bill_verification'
-    });
+  } else {
+    // Handle any other HTTP method
+    console.log(`Rejecting ${req.method} request - only POST and OPTIONS are allowed`);
+    res.setHeader('Allow', ['POST', 'OPTIONS']);
+    res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 } 
