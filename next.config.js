@@ -22,6 +22,14 @@ const nextConfig = {
   images: {
     domains: ['firebasestorage.googleapis.com']
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: '/api/:path*'
+      }
+    ];
+  },
   async headers() {
     return [
       {

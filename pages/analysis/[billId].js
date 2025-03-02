@@ -114,7 +114,8 @@ export default function BillAnalysis() {
         userId: currentUser.uid
       });
 
-      const response = await fetch('/api/analyze', {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const response = await fetch(`${baseUrl}/api/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
