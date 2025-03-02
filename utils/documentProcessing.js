@@ -1,9 +1,7 @@
 import pdf from 'pdf-parse';
-import { createWorker } from 'tesseract.js';
 import OpenAI from 'openai';
 import fetch from 'node-fetch';
-import { storage } from '../firebase';
-import { getDownloadURL, ref } from 'firebase/storage';
+import { getWorker, terminateWorker } from './tesseractWorker';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -37,45 +35,28 @@ export async function extractTextFromPDF(pdfBuffer) {
 
 export async function extractTextFromImage(imageBuffer) {
   console.log('Starting text extraction process...');
+  let worker = null;
   
   try {
-    // Create a worker with detailed logging
-    const worker = await createWorker({
-      logger: m => console.log('OCR Progress:', m),
-      errorHandler: err => console.error('OCR Error:', err)
-    });
-
-    console.log('Tesseract worker created');
-
-    // Initialize worker
-    await worker.loadLanguage('eng');
-    await worker.initialize('eng');
-    
-    // Set parameters for better recognition
-    await worker.setParameters({
-      tessedit_ocr_engine_mode: 3, // Legacy + LSTM mode
-      preserve_interword_spaces: '1',
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/" ', // Add any characters you expect
-    });
-
-    console.log('Starting OCR process...');
+    worker = await getWorker();
+    console.log('Got Tesseract worker');
     
     // Convert buffer to base64
     const base64Image = imageBuffer.toString('base64');
     
     // Recognize text from base64
+    console.log('Starting OCR recognition...');
     const { data: { text } } = await worker.recognize(`data:image/png;base64,${base64Image}`);
-    
-    // Clean up
-    await worker.terminate();
+    console.log('OCR recognition completed');
 
     if (!text || text.trim().length === 0) {
       throw new Error('No text was extracted from the image');
     }
 
     console.log('OCR completed, text length:', text.length);
+    console.log('First 200 chars:', text.substring(0, 200));
+    
     return text;
-
   } catch (error) {
     console.error('Text extraction error:', error);
     throw new Error(`Text extraction failed: ${error.message}`);
@@ -205,7 +186,7 @@ export async function processWithLLM(text, isVerificationMode = false) {
           content: prompt
         }
       ],
-      temperature: 0.1, // Lower temperature for more consistent formatting
+      temperature: 0.1,
       max_tokens: 2000
     });
 
@@ -217,17 +198,13 @@ export async function processWithLLM(text, isVerificationMode = false) {
     console.log('Raw OpenAI response:', responseContent);
 
     try {
-      // Try to parse the response as JSON
       const parsedResponse = JSON.parse(responseContent);
       
       if (isVerificationMode) {
-        // Validate verification response
         if (typeof parsedResponse.isMedicalBill !== 'boolean') {
           throw new Error('Invalid verification response: isMedicalBill must be a boolean');
         }
-        return parsedResponse;
       } else {
-        // Validate the required structure for data extraction
         const requiredKeys = ['patientInfo', 'billInfo', 'services', 'insuranceInfo'];
         const missingKeys = requiredKeys.filter(key => !parsedResponse[key]);
         
@@ -235,7 +212,6 @@ export async function processWithLLM(text, isVerificationMode = false) {
           throw new Error(`Missing required keys: ${missingKeys.join(', ')}`);
         }
 
-        // Validate services array
         if (!Array.isArray(parsedResponse.services) || parsedResponse.services.length === 0) {
           throw new Error('Services must be a non-empty array');
         }
@@ -286,4 +262,4 @@ export async function detectFileType(fileUrl) {
     error.details = { url: fileUrl };
     throw error;
   }
-} 
+}
