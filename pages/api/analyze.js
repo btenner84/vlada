@@ -86,9 +86,6 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
 };
 
 export default async function handler(req, res) {
-  // Increase timeout for Vercel
-  res.setTimeout(60000); // 60 seconds timeout
-
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
