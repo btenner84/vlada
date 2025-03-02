@@ -114,62 +114,71 @@ export default function BillAnalysis() {
         userId: currentUser.uid
       });
 
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const response = await fetch(`${baseUrl}/api/analyze`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          billId: billData.id,
-          fileUrl: billData.fileUrl,
-          userId: currentUser.uid
-        })
-      });
-
-      console.log('Response status:', response.status);
-      const contentType = response.headers.get('content-type');
-      console.log('Response content-type:', contentType);
-
-      let data;
-      try {
-        const text = await response.text();
-        console.log('Raw response:', text);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}, body: ${text}`);
-        }
-
-        try {
-          data = JSON.parse(text);
-        } catch (parseError) {
-          console.error('Failed to parse response as JSON:', text);
-          throw new Error('Invalid JSON response from server');
-        }
-      } catch (error) {
-        console.error('API request failed:', error);
-        throw error;
-      }
-
-      setExtractedData(data);
-      setIsMedicalBill(data.isMedicalBill);
+      // Always use a relative URL for API calls
+      const apiUrl = '/api/analyze';
+      console.log(`Calling API at ${apiUrl}`);
       
-      // Get the raw extracted text from Firestore
-      const docRef = doc(db, 'bills', billData.id);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const extractedText = docSnap.data().extractedText || '';
-        console.log('Extracted text:', extractedText);
-        setRawData(prev => ({ ...prev, extractedText }));
-      }
+      try {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            billId: billData.id,
+            fileUrl: billData.fileUrl,
+            userId: currentUser.uid
+          })
+        });
+        
+        console.log('Response status:', response.status);
+        const contentType = response.headers.get('content-type');
+        console.log('Response content-type:', contentType);
 
-      setAnalysisStatus('complete');
+        let data;
+        try {
+          const text = await response.text();
+          console.log('Raw response:', text);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}, body: ${text}`);
+          }
+
+          try {
+            data = JSON.parse(text);
+          } catch (parseError) {
+            console.error('Failed to parse response as JSON:', text);
+            throw new Error('Invalid JSON response from server');
+          }
+        } catch (error) {
+          console.error('API request failed:', error);
+          throw error;
+        }
+
+        setExtractedData(data);
+        setIsMedicalBill(data.isMedicalBill);
+        
+        // Get the raw extracted text from Firestore
+        const docRef = doc(db, 'bills', billData.id);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const extractedText = docSnap.data().extractedText || '';
+          console.log('Extracted text:', extractedText);
+          setRawData(prev => ({ ...prev, extractedText }));
+        }
+
+        setAnalysisStatus('complete');
+      } catch (error) {
+        console.error('Extraction error:', error);
+        setAnalysisStatus('error');
+        setExtractedData({ error: error.message });
+        setRawData(prev => ({ ...prev, loading: false }));
+      }
     } catch (error) {
       console.error('Extraction error:', error);
       setAnalysisStatus('error');
       setExtractedData({ error: error.message });
-    } finally {
       setRawData(prev => ({ ...prev, loading: false }));
     }
   };
