@@ -14,13 +14,14 @@ export default function handler(req, res) {
     return;
   }
 
-  // Return a simple response for all methods
-  res.status(200).json({
-    message: 'API is working',
+  // Log request details for debugging
+  console.log('Test API Route Handler - Request Method:', req.method);
+  console.log('Test API Route Handler - Request Headers:', JSON.stringify(req.headers));
+
+  return res.status(200).json({ 
+    success: true, 
+    message: 'API test endpoint is working',
     method: req.method,
-    query: req.query,
-    headers: req.headers,
-    url: req.url,
     timestamp: new Date().toISOString()
   });
 } 

@@ -101,7 +101,13 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Log request details for debugging
+  console.log('API Route Handler - Request Method:', req.method);
+  console.log('API Route Handler - Request Headers:', JSON.stringify(req.headers));
+  console.log('API Route Handler - Request Body:', JSON.stringify(req.body));
+
   if (req.method !== 'POST') {
+    console.log('API Route Handler - Method not allowed:', req.method);
     return res.status(405).json({ 
       error: 'Method not allowed',
       allowedMethod: 'POST',

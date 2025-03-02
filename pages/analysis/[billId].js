@@ -63,9 +63,19 @@ export default function BillAnalysis() {
       // Test the API endpoint
       try {
         console.log('Testing API endpoint...');
-        const testResponse = await fetch('/api/test');
-        const testData = await testResponse.json();
-        console.log('Test API response:', testData);
+        const testResponse = await fetch(`${window.location.origin}/api/test`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          }
+        });
+        
+        if (testResponse.ok) {
+          const testData = await testResponse.json();
+          console.log('Test API response:', testData);
+        } else {
+          console.log('Test API failed:', testResponse.status);
+        }
       } catch (testError) {
         console.error('Test API error:', testError);
       }
@@ -125,11 +135,31 @@ export default function BillAnalysis() {
       });
 
       // Always use a relative URL for API calls
-      const apiUrl = '/api/analyze';
+      const apiUrl = `${window.location.origin}/api/analyze`;
       console.log(`Calling API at ${apiUrl}`);
       console.log('Current hostname:', window.location.hostname);
       console.log('Current origin:', window.location.origin);
       console.log('Current pathname:', window.location.pathname);
+      
+      // Test the API endpoint first
+      try {
+        console.log('Testing API endpoint...');
+        const testResponse = await fetch(`${window.location.origin}/api/test`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+          }
+        });
+        
+        if (testResponse.ok) {
+          const testData = await testResponse.json();
+          console.log('Test API response:', testData);
+        } else {
+          console.log('Test API failed:', testResponse.status);
+        }
+      } catch (testError) {
+        console.error('Test API error:', testError);
+      }
       
       try {
         // Log the request details
