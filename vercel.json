@@ -1,24 +1,11 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "buildCommand": "next build",
-  "outputDirectory": ".next",
   "framework": "nextjs",
+  "buildCommand": "next build",
   "functions": {
     "api/**/*.js": {
       "memory": 3008,
       "maxDuration": 60
-    }
-  },
-  "build": {
-    "env": {
-      "SHARP_IGNORE_GLOBAL_LIBVIPS": "1",
-      "NODE_OPTIONS": "--max-old-space-size=3072"
     }
   },
   "env": {
