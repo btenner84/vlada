@@ -2,46 +2,44 @@ import { createWorker } from 'tesseract.js';
 import OpenAI from 'openai';
 
 // Client-side worker management
-let worker = null;
+let clientWorker = null;
 
-export async function getClientWorker() {
-  if (!worker) {
-    console.log('Creating new client-side Tesseract worker...');
-    worker = await createWorker({
-      logger: m => console.log('Client OCR Progress:', m),
-      errorHandler: err => console.error('Client OCR Error:', err)
+export async function getClientWorker(progressHandler = null) {
+  if (!clientWorker) {
+    console.log('Initializing new Tesseract worker...');
+    clientWorker = await createWorker({
+      logger: progressHandler || console.log,
+      errorHandler: console.error
     });
     
-    console.log('Initializing client worker...');
-    await worker.loadLanguage('eng');
-    await worker.initialize('eng');
-    await worker.setParameters({
-      tessedit_ocr_engine_mode: 3,
-      preserve_interword_spaces: '1',
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/" '
+    await clientWorker.loadLanguage('eng');
+    await clientWorker.initialize('eng');
+    await clientWorker.setParameters({
+      tessedit_ocr_engine_mode: 1,
+      preserve_interword_spaces: 1,
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/\\ '
     });
-    console.log('Client worker initialized successfully');
   }
-  return worker;
+  return clientWorker;
 }
 
 export async function terminateClientWorker() {
-  if (worker) {
-    await worker.terminate();
-    worker = null;
+  if (clientWorker) {
+    await clientWorker.terminate();
+    clientWorker = null;
   }
 }
 
-export async function extractTextFromImageClient(imageUrl) {
-  console.log('Starting client-side image OCR process...');
-  
+export async function extractTextFromImageClient(imageUrl, progressHandler = null) {
   try {
+    console.log('Starting client-side image text extraction...', { imageUrl });
+    
+    // Get the worker with progress handler
+    const worker = await getClientWorker(progressHandler);
+    
     // Use our proxy endpoint instead of direct Firebase URL
     const proxyUrl = convertToProxyUrl(imageUrl);
     console.log('Using proxy URL for image:', proxyUrl);
-    
-    // Get the Tesseract worker
-    const worker = await getClientWorker();
     
     // Fetch the image with credentials
     console.log('Fetching image from URL:', proxyUrl);
@@ -136,7 +134,7 @@ function extractStructuredDataFromOCR(tsv) {
   }
 }
 
-export async function extractTextFromPDFClient(pdfUrl) {
+export async function extractTextFromPDFClient(pdfUrl, progressHandler = null) {
   console.log('Starting client-side PDF text extraction...');
   
   try {
@@ -290,7 +288,6 @@ function convertToProxyUrl(fileUrl) {
     // Check if it's a Firebase Storage URL
     if (url.hostname.includes('firebasestorage.googleapis.com')) {
       // Extract the path from the URL
-      // The path is in the format: /v0/b/[bucket]/o/[path]?alt=media&token=[token]
       const pathMatch = url.pathname.match(/\/v0\/b\/[^\/]+\/o\/(.+)/);
       
       if (pathMatch && pathMatch[1]) {
@@ -305,28 +302,23 @@ function convertToProxyUrl(fileUrl) {
         if (pathParts.length >= 2 && pathParts[0] === 'bills') {
           const userId = pathParts[1];
           
-          // The billId might be part of the filename or a separate path component
-          // Format is typically: timestamp_billId or just billId
-          let billId = null;
-          if (pathParts.length > 2) {
-            const filenameMatch = pathParts[2].match(/\d+_([^\.]+)/);
-            if (filenameMatch && filenameMatch[1]) {
-              billId = filenameMatch[1];
-            }
+          // Try to extract billId from the URL search params first
+          const urlParams = new URLSearchParams(url.search);
+          const billIdParam = urlParams.get('billId');
+          
+          if (billIdParam) {
+            console.log('Extracted billId from URL params:', billIdParam);
+            
+            // Construct the proxy URL with userId and billId
+            const origin = window.location.origin;
+            const proxyUrl = `${origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billIdParam)}`;
+            console.log('Generated proxy URL:', proxyUrl);
+            return proxyUrl;
           }
-          
-          console.log('Extracted userId:', userId);
-          console.log('Extracted billId:', billId);
-          
-          // Construct the proxy URL with userId and billId if available
-          const origin = window.location.origin;
-          const proxyUrl = `${origin}/api/proxy-file?path=${encodedPath}${userId ? `&userId=${userId}` : ''}${billId ? `&billId=${billId}` : ''}`;
-          console.log('Generated proxy URL:', proxyUrl);
-          return proxyUrl;
         }
         
         // If we can't extract userId and billId, just use the path
-        const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodedPath}`;
+        const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}`;
         console.log('Generated simple proxy URL:', proxyUrl);
         return proxyUrl;
       }
@@ -346,20 +338,15 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
     console.log('Starting client-side LLM processing with text length:', text.length);
     console.log('Mode:', isVerificationMode ? 'Verification' : 'Data Extraction');
     
-    // For client-side, we'll use a more sophisticated approach with regex patterns
-    
     if (isVerificationMode) {
       // Enhanced heuristic to check if it's a medical bill
       const medicalTerms = [
         'patient', 'diagnosis', 'procedure', 'insurance', 'claim', 'medical', 'hospital', 
         'doctor', 'treatment', 'billing', 'healthcare', 'clinic', 'physician', 'provider',
-        'service', 'charge', 'payment', 'balance', 'due', 'amount', 'copay', 'deductible',
-        'statement', 'invoice', 'account', 'visit', 'admission', 'discharge', 'emergency',
-        'outpatient', 'inpatient', 'lab', 'radiology', 'pharmacy', 'prescription', 'medication'
+        'service', 'charge', 'payment', 'balance', 'due', 'amount', 'copay', 'deductible'
       ];
       
       const lowercaseText = text.toLowerCase();
-      
       let matchCount = 0;
       const matchedTerms = [];
       
@@ -370,127 +357,124 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
         }
       }
       
-      // Check for currency patterns
-      const hasCurrencyPattern = /\$\s*\d+(?:[,.]\d+)*|\d+\s*(?:USD|dollars)/i.test(text);
-      if (hasCurrencyPattern) {
-        matchCount++;
-        matchedTerms.push('currency');
-      }
-      
-      // Check for date patterns
-      const hasDatePattern = /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\w+\s+\d{1,2},\s+\d{4}/i.test(text);
-      if (hasDatePattern) {
-        matchCount++;
-        matchedTerms.push('date');
-      }
-      
-      const isMedicalBill = matchCount >= 5;
-      const confidence = matchCount >= 8 ? 'high' : (matchCount >= 5 ? 'medium' : 'low');
-      const reason = isMedicalBill 
-        ? `Found ${matchCount} medical bill indicators: ${matchedTerms.slice(0, 5).join(', ')}${matchedTerms.length > 5 ? '...' : ''}` 
-        : 'Not enough medical bill indicators found in the document';
+      const isMedicalBill = matchCount >= 3;
+      const confidence = matchCount >= 6 ? 'high' : (matchCount >= 3 ? 'medium' : 'low');
       
       return {
         isMedicalBill,
         confidence,
-        reason
-      };
-    } else {
-      // Enhanced extraction using regex patterns
-      
-      // Patient information
-      const patientNameMatch = text.match(/(?:patient|name)[\s:]+([A-Za-z\s.,'-]+)(?:\r|\n|,|;|$)/i) || 
-                              text.match(/(?:name|patient)[\s:]*([A-Za-z\s.,'-]+)(?:\r|\n|,|;|$)/i);
-      
-      const dobMatch = text.match(/(?:birth|dob|born)[\s:]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i) ||
-                       text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})(?:\s+|\r|\n|,|;)(?:dob|birth|born)/i);
-      
-      const accountMatch = text.match(/(?:account|acct|acc)[\s:#]+([A-Z0-9-]+)/i) ||
-                          text.match(/(?:mrn|record|chart)[\s:#]+([A-Z0-9-]+)/i);
-      
-      const insuranceMatch = text.match(/(?:insurance|insurer|plan|policy)[\s:]+([A-Za-z0-9\s.,'-]+)(?:\r|\n|,|;|$)/i);
-      
-      // Bill information
-      const totalAmountMatch = text.match(/(?:total|amount|balance|due|pay this amount)[\s:]*[$]?([0-9,.]+)/i) ||
-                              text.match(/[$]([0-9,.]+)(?:\s+|\r|\n|,|;)(?:total|amount|balance|due)/i);
-      
-      const serviceDateMatch = text.match(/(?:service|dos|date of service)[\s:]+([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i) ||
-                              text.match(/([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})(?:\s+|\r|\n|,|;)(?:service|dos)/i);
-      
-      const dueDateMatch = text.match(/(?:due|payment due|pay by)[\s:]+([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i) ||
-                          text.match(/([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})(?:\s+|\r|\n|,|;)(?:due date|payment due)/i);
-      
-      const facilityMatch = text.match(/(?:facility|hospital|provider|clinic|center)[\s:]+([A-Za-z0-9\s.,'-]+)(?:\r|\n|,|;|$)/i);
-      
-      // Extract services
-      const services = [];
-      
-      // Look for service lines with amounts
-      const serviceLines = text.match(/([A-Za-z0-9\s.,'-]+)[\s:]+[$]?([0-9,.]+)/g);
-      if (serviceLines) {
-        for (const line of serviceLines) {
-          const parts = line.match(/([A-Za-z0-9\s.,'-]+)[\s:]+[$]?([0-9,.]+)/);
-          if (parts && parts.length >= 3) {
-            const description = parts[1].trim();
-            const amount = parts[2].trim();
-            
-            // Skip if this looks like a total or subtotal
-            if (!/total|balance|due|amount|pay/i.test(description)) {
-              services.push({
-                description,
-                code: "Not found",
-                amount,
-                details: "Not found"
-              });
-            }
-          }
-        }
-      }
-      
-      // If no services found, add a default one
-      if (services.length === 0) {
-        services.push({
-          description: "Medical service",
-          code: "Not found",
-          amount: totalAmountMatch ? totalAmountMatch[1].trim() : "Not found",
-          details: "Not found"
-        });
-      }
-      
-      // Insurance information
-      const amountCoveredMatch = text.match(/(?:insurance paid|covered|plan paid)[\s:]*[$]?([0-9,.]+)/i);
-      const patientResponsibilityMatch = text.match(/(?:patient responsibility|patient pays|you pay|your responsibility)[\s:]*[$]?([0-9,.]+)/i);
-      const adjustmentsMatch = text.match(/(?:adjustment|discount|write-off)[\s:]*[$]?([0-9,.]+)/i);
-      
-      return {
-        patientInfo: {
-          fullName: patientNameMatch ? patientNameMatch[1].trim() : "Not found",
-          dateOfBirth: dobMatch ? dobMatch[1].trim() : "Not found",
-          accountNumber: accountMatch ? accountMatch[1].trim() : "Not found",
-          insuranceInfo: insuranceMatch ? insuranceMatch[1].trim() : "Not found"
-        },
-        billInfo: {
-          totalAmount: totalAmountMatch ? totalAmountMatch[1].trim() : "Not found",
-          serviceDates: serviceDateMatch ? serviceDateMatch[1].trim() : "Not found",
-          dueDate: dueDateMatch ? dueDateMatch[1].trim() : "Not found",
-          facilityName: facilityMatch ? facilityMatch[1].trim() : "Not found"
-        },
-        services,
-        insuranceInfo: {
-          amountCovered: amountCoveredMatch ? amountCoveredMatch[1].trim() : "Not found",
-          patientResponsibility: patientResponsibilityMatch ? patientResponsibilityMatch[1].trim() : 
-                                (totalAmountMatch ? totalAmountMatch[1].trim() : "Not found"),
-          adjustments: adjustmentsMatch ? adjustmentsMatch[1].trim() : "Not found"
-        }
+        reason: isMedicalBill 
+          ? `Found ${matchCount} medical bill indicators: ${matchedTerms.join(', ')}`
+          : 'Not enough medical bill indicators found'
       };
     }
+    
+    // For data extraction, ensure we always return a complete structure
+    const defaultData = {
+      patientInfo: {
+        fullName: "Not found",
+        dateOfBirth: "Not found",
+        accountNumber: "Not found",
+        insuranceInfo: "Not found"
+      },
+      billInfo: {
+        totalAmount: "Not found",
+        serviceDates: "Not found",
+        dueDate: "Not found",
+        facilityName: "Not found"
+      },
+      services: [{
+        description: "Medical service",
+        code: "Not found",
+        amount: "Not found",
+        details: "Not found"
+      }],
+      insuranceInfo: {
+        amountCovered: "Not found",
+        patientResponsibility: "Not found",
+        adjustments: "Not found"
+      },
+      isMedicalBill: false,
+      confidence: "low",
+      extractedText: text
+    };
+    
+    // Try to extract information from the text
+    const lowercaseText = text.toLowerCase();
+    
+    // Check if it's a medical bill (but don't gate extraction on this)
+    const verificationResult = await processWithClientLLM(text, true);
+    defaultData.isMedicalBill = verificationResult.isMedicalBill;
+    defaultData.confidence = verificationResult.confidence;
+    
+    // Always try to extract information, regardless of medical bill detection
+    // Extract patient information
+    const patientNameMatch = text.match(/(?:patient|name)[\s:]+([A-Za-z\s.,'-]+)(?:\r|\n|,|;|$)/i);
+    if (patientNameMatch) {
+      defaultData.patientInfo.fullName = patientNameMatch[1].trim();
+    }
+    
+    // Extract amount - look for any currency amounts
+    const amountMatches = text.match(/[$]?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
+    if (amountMatches && amountMatches.length > 0) {
+      // Use the largest amount as the total
+      const amounts = amountMatches.map(amt => parseFloat(amt.replace(/[$,]/g, '')));
+      const maxAmount = Math.max(...amounts);
+      defaultData.billInfo.totalAmount = maxAmount.toFixed(2);
+    }
+    
+    // Extract dates - look for any dates
+    const dateMatches = text.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/g);
+    if (dateMatches && dateMatches.length > 0) {
+      defaultData.billInfo.serviceDates = dateMatches[0];
+      if (dateMatches.length > 1) {
+        defaultData.billInfo.dueDate = dateMatches[dateMatches.length - 1];
+      }
+    }
+    
+    // Extract facility/provider - look for any business names
+    const facilityMatch = text.match(/(?:facility|hospital|provider|clinic|center|medical|health|care)[\s:]+([A-Za-z0-9\s.,'-]+)(?:\r|\n|,|;|$)/i);
+    if (facilityMatch) {
+      defaultData.billInfo.facilityName = facilityMatch[1].trim();
+    }
+    
+    // Extract services - look for line items with amounts
+    const serviceLines = text.match(/([A-Za-z0-9\s.,'-]+)[\s:]+[$]?\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g);
+    if (serviceLines && serviceLines.length > 0) {
+      defaultData.services = serviceLines.map(line => {
+        const [description, amount] = line.split(/[\s:]+(?=[$]?\d)/);
+        return {
+          description: description.trim(),
+          code: "Not found",
+          amount: amount ? amount.trim() : "Not found",
+          details: "Not found"
+        };
+      });
+    }
+    
+    // Extract insurance information
+    const insuranceMatch = text.match(/(?:insurance|coverage|plan|policy)[\s:]+([A-Za-z0-9\s.,'-]+)(?:\r|\n|,|;|$)/i);
+    if (insuranceMatch) {
+      defaultData.patientInfo.insuranceInfo = insuranceMatch[1].trim();
+    }
+    
+    return defaultData;
   } catch (error) {
     console.error('Client-side LLM processing error:', error);
-    throw new Error(`Client-side LLM processing failed: ${error.message}`);
+    // Return a valid structure even on error
+    return {
+      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
+      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
+      services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
+      insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" },
+      isMedicalBill: false,
+      confidence: "error",
+      extractedText: "Error processing document"
+    };
   }
 }
 
-export async function analyzeDocumentClient(fileUrl) {
+export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
   console.log('Starting client-side document analysis...', { fileUrl });
   
   try {
@@ -502,9 +486,9 @@ export async function analyzeDocumentClient(fileUrl) {
     let extractedText = '';
     
     if (fileType === 'pdf') {
-      extractedText = await extractTextFromPDFClient(fileUrl);
+      extractedText = await extractTextFromPDFClient(fileUrl, progressHandler);
     } else if (fileType === 'image') {
-      extractedText = await extractTextFromImageClient(fileUrl);
+      extractedText = await extractTextFromImageClient(fileUrl, progressHandler);
     } else {
       throw new Error(`Unsupported file type: ${fileType}`);
     }

@@ -62,10 +62,10 @@ export default async function handler(req, res) {
     return;
   }
   
-  // Only allow GET requests
-  if (req.method !== 'GET') {
-    console.log(`Rejecting ${req.method} request - only GET is allowed`);
-    res.setHeader('Allow', ['GET', 'OPTIONS']);
+  // Only allow GET and HEAD requests
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    console.log(`Rejecting ${req.method} request - only GET and HEAD are allowed`);
+    res.setHeader('Allow', ['GET', 'HEAD', 'OPTIONS']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
@@ -91,11 +91,23 @@ export default async function handler(req, res) {
     if (userId && billId) {
       console.log('Verifying document ownership');
       try {
+        // Check the specific bill document
         const billDoc = await adminDb.collection('bills').doc(billId).get();
-        if (!billDoc.exists || billDoc.data().userId !== userId) {
-          console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
+        
+        if (!billDoc.exists) {
+          console.log('Bill document not found:', billId);
+          return res.status(404).json({ error: 'Document not found' });
+        }
+        
+        if (billDoc.data().userId !== userId) {
+          console.log('Unauthorized access attempt:', {
+            requestedBillId: billId,
+            requestUserId: userId,
+            actualUserId: billDoc.data().userId
+          });
           return res.status(403).json({ error: 'Unauthorized access to this document' });
         }
+        
         console.log('Document ownership verified');
       } catch (authError) {
         console.error('Error verifying document ownership:', authError);
@@ -138,7 +150,14 @@ export default async function handler(req, res) {
       // Set the content type header
       res.setHeader('Content-Type', contentType);
       
-      // Stream the file to the response
+      // For HEAD requests, just return the headers
+      if (req.method === 'HEAD') {
+        console.log('HEAD request - returning headers only');
+        res.status(200).end();
+        return;
+      }
+      
+      // For GET requests, stream the file
       console.log('Streaming file to response');
       const fileStream = file.createReadStream();
       

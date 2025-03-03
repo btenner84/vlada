@@ -8,6 +8,77 @@ import { db } from '../../firebase';
 import { getFirestore } from 'firebase/firestore';
 import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
 
+const LoadingScreen = ({ progress }) => {
+  return (
+    <div style={{
+      height: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      background: theme.colors.bgPrimary,
+      color: theme.colors.textPrimary,
+      gap: "2rem"
+    }}>
+      {/* Animated Brain Icon */}
+      <div style={{
+        fontSize: "4rem",
+        animation: "pulse 2s infinite"
+      }}>
+        🧠
+      </div>
+
+      {/* Progress Text */}
+      <div style={{
+        fontSize: "1.5rem",
+        fontWeight: "600",
+        textAlign: "center",
+        maxWidth: "600px",
+        lineHeight: "1.5"
+      }}>
+        {progress?.status === 'loading_model' && "Loading OCR model..."}
+        {progress?.status === 'recognizing' && (
+          <>
+            Analyzing your document
+            <div style={{
+              fontSize: "1rem",
+              color: theme.colors.textSecondary,
+              marginTop: "0.5rem"
+            }}>
+              {Math.round(progress.progress * 100)}% complete
+            </div>
+          </>
+        )}
+        {!progress?.status && "Preparing analysis..."}
+      </div>
+
+      {/* Progress Bar */}
+      <div style={{
+        width: "300px",
+        height: "4px",
+        background: "rgba(255, 255, 255, 0.1)",
+        borderRadius: "2px",
+        overflow: "hidden"
+      }}>
+        <div style={{
+          width: `${progress?.progress ? Math.round(progress.progress * 100) : 0}%`,
+          height: "100%",
+          background: theme.colors.gradientPrimary,
+          transition: "width 0.3s ease"
+        }} />
+      </div>
+
+      <style jsx>{`
+        @keyframes pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.1); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+};
+
 export default function BillAnalysis() {
   const router = useRouter();
   const { billId } = router.query;
@@ -25,6 +96,7 @@ export default function BillAnalysis() {
   const [error, setError] = useState(null);
   const [processingMethod, setProcessingMethod] = useState(null); // server, client, or fallback
   const [analysisVersion, setAnalysisVersion] = useState(null);
+  const [ocrProgress, setOcrProgress] = useState(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -273,8 +345,11 @@ export default function BillAnalysis() {
           console.log('Starting client-side document processing');
           setProcessingMethod('client');
           
-          // Process the document client-side
-          const result = await analyzeDocumentClient(billData.fileUrl);
+          // Process the document client-side with progress handler
+          const result = await analyzeDocumentClient(billData.fileUrl, handleOcrProgress);
+          
+          // Reset OCR progress when done
+          setOcrProgress(null);
           
           if (result && result.extractedText) {
             console.log('Client-side processing successful');
@@ -395,6 +470,7 @@ export default function BillAnalysis() {
       }
     } finally {
       setIsLoading(false);
+      setOcrProgress(null);
     }
   };
 
@@ -411,6 +487,21 @@ export default function BillAnalysis() {
       console.log('Extracted data updated:', extractedData);
     }
   }, [extractedData]);
+
+  // Update the logger in getClientWorker
+  const handleOcrProgress = (m) => {
+    console.log('Client OCR Progress:', m);
+    if (m.status === 'loading tesseract core') {
+      setOcrProgress({ status: 'loading_model', progress: 0 });
+    } else if (m.status === 'recognizing text') {
+      setOcrProgress({ status: 'recognizing', progress: m.progress });
+    }
+  };
+
+  // Update the loading state check
+  if (isLoading || ocrProgress) {
+    return <LoadingScreen progress={ocrProgress} />;
+  }
 
   if (isLoading) {
     return (
