@@ -26,6 +26,8 @@ export default function Dashboard() {
   const [editingFileName, setEditingFileName] = useState(null);
   const [newFileName, setNewFileName] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showAllUploads, setShowAllUploads] = useState(false);
+  const [showAllAnalyzedBills, setShowAllAnalyzedBills] = useState(false);
 
   const fetchUploads = useCallback(async () => {
     if (!user) return;
@@ -866,177 +868,208 @@ export default function Dashboard() {
               }}>Recent Uploads</h3>
 
               {recentUploads.length > 0 ? (
-                <div style={{ display: "grid", gap: isMobile ? "0.75rem" : "1rem" }}>
-                  {recentUploads.map((upload, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        background: "rgba(255, 255, 255, 0.05)",
-                        borderRadius: theme.borderRadius.md,
-                        padding: isMobile ? "0.75rem" : "1rem",
-                        border: "1px solid rgba(255, 255, 255, 0.1)",
-                        display: "flex",
-                        flexDirection: isMobile ? "column" : "row",
-                        justifyContent: "space-between",
-                        alignItems: isMobile ? "flex-start" : "center",
-                        gap: isMobile ? "0.75rem" : "0"
-                      }}
-                    >
-                      <div style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.25rem",
-                        flex: 1,
-                        minWidth: 0 // Enable text truncation
-                      }}>
-                        {editingFileName === upload.id ? (
-                          <input
-                            type="text"
-                            value={newFileName}
-                            onChange={(e) => setNewFileName(e.target.value)}
-                            style={{
-                              background: "rgba(255, 255, 255, 0.1)",
-                              border: "1px solid rgba(255, 255, 255, 0.2)",
-                              borderRadius: theme.borderRadius.sm,
-                              color: theme.colors.textPrimary,
-                              padding: "0.25rem 0.5rem",
-                              fontSize: "0.95rem",
-                              width: "100%"
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleEditFileName(upload.id, upload.fileName);
-                              } else if (e.key === 'Escape') {
-                                setEditingFileName(null);
-                                setNewFileName('');
-                              }
-                            }}
-                            autoFocus
-                          />
-                        ) : (
-                          <div style={{
-                            fontSize: "0.95rem",
-                            fontWeight: "500",
-                            color: theme.colors.textPrimary,
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "0.5rem"
-                          }}>
-                            {upload.fileName}
-                            <button
-                              onClick={() => handleEditFileName(upload.id, upload.fileName)}
-                              style={{
-                                background: "transparent",
-                                border: "none",
-                                padding: "0.25rem",
-                                cursor: "pointer",
-                                opacity: 0.7,
-                                transition: "opacity 0.2s ease"
-                              }}
-                              onMouseEnter={(e) => e.target.style.opacity = 1}
-                              onMouseLeave={(e) => e.target.style.opacity = 0.7}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                              </svg>
-                            </button>
-                          </div>
-                        )}
+                <>
+                  <div style={{ display: "grid", gap: isMobile ? "0.75rem" : "1rem" }}>
+                    {(showAllUploads ? recentUploads : recentUploads.slice(0, 5)).map((upload, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          background: "rgba(255, 255, 255, 0.05)",
+                          borderRadius: theme.borderRadius.md,
+                          padding: isMobile ? "0.75rem" : "1rem",
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          display: "flex",
+                          flexDirection: isMobile ? "column" : "row",
+                          justifyContent: "space-between",
+                          alignItems: isMobile ? "flex-start" : "center",
+                          gap: isMobile ? "0.75rem" : "0"
+                        }}
+                      >
                         <div style={{
-                          fontSize: "0.8rem",
-                          color: theme.colors.textSecondary
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.25rem",
+                          flex: 1,
+                          minWidth: 0 // Enable text truncation
                         }}>
-                          {new Date(upload.uploadedAt).toLocaleDateString()}
+                          {editingFileName === upload.id ? (
+                            <input
+                              type="text"
+                              value={newFileName}
+                              onChange={(e) => setNewFileName(e.target.value)}
+                              style={{
+                                background: "rgba(255, 255, 255, 0.1)",
+                                border: "1px solid rgba(255, 255, 255, 0.2)",
+                                borderRadius: theme.borderRadius.sm,
+                                color: theme.colors.textPrimary,
+                                padding: "0.25rem 0.5rem",
+                                fontSize: "0.95rem",
+                                width: "100%"
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleEditFileName(upload.id, upload.fileName);
+                                } else if (e.key === 'Escape') {
+                                  setEditingFileName(null);
+                                  setNewFileName('');
+                                }
+                              }}
+                              autoFocus
+                            />
+                          ) : (
+                            <div style={{
+                              fontSize: "0.95rem",
+                              fontWeight: "500",
+                              color: theme.colors.textPrimary,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem"
+                            }}>
+                              {upload.fileName}
+                              <button
+                                onClick={() => handleEditFileName(upload.id, upload.fileName)}
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  padding: "0.25rem",
+                                  cursor: "pointer",
+                                  opacity: 0.7,
+                                  transition: "opacity 0.2s ease"
+                                }}
+                                onMouseEnter={(e) => e.target.style.opacity = 1}
+                                onMouseLeave={(e) => e.target.style.opacity = 0.7}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                                </svg>
+                              </button>
+                            </div>
+                          )}
+                          <div style={{
+                            fontSize: "0.8rem",
+                            color: theme.colors.textSecondary
+                          }}>
+                            {new Date(upload.uploadedAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <div style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          alignItems: "center",
+                          flexShrink: 0, // Prevent button from shrinking
+                          width: isMobile ? "100%" : "auto",
+                          justifyContent: isMobile ? "space-between" : "flex-end"
+                        }}>
+                          <a
+                            href={upload.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              background: "rgba(31, 41, 55, 0.7)",
+                              border: "1px solid rgba(255, 255, 255, 0.2)",
+                              padding: "0.5rem",
+                              borderRadius: theme.borderRadius.md,
+                              color: theme.colors.textPrimary,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              transition: "all 0.2s ease",
+                              width: isMobile ? "40px" : "32px",
+                              height: isMobile ? "40px" : "32px",
+                              backdropFilter: "blur(8px)",
+                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+                              flex: isMobile ? "1" : "0"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
+                              e.target.style.borderColor = "rgba(255, 255, 255, 0.3)";
+                              e.target.style.transform = "scale(1.05)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
+                              e.target.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                              e.target.style.transform = "scale(1)";
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                              <polyline points="15 3 21 3 21 9"/>
+                              <line x1="10" y1="14" x2="21" y2="3"/>
+                            </svg>
+                          </a>
+                          <button
+                            onClick={() => handleDelete(upload.id, upload.storagePath)}
+                            disabled={deletingFile}
+                            style={{
+                              background: "rgba(31, 41, 55, 0.7)",
+                              border: "1px solid rgba(220, 38, 38, 0.3)",
+                              color: "#DC2626",
+                              cursor: deletingFile ? "not-allowed" : "pointer",
+                              opacity: deletingFile ? 0.5 : 1,
+                              padding: "0.5rem",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: theme.borderRadius.md,
+                              transition: "all 0.2s ease",
+                              width: isMobile ? "40px" : "32px",
+                              height: isMobile ? "40px" : "32px",
+                              backdropFilter: "blur(8px)",
+                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+                              flex: isMobile ? "1" : "0"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
+                              e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
+                              e.target.style.transform = "scale(1.05)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
+                              e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
+                              e.target.style.transform = "scale(1)";
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 6h18"/>
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                            </svg>
+                          </button>
                         </div>
                       </div>
-                      <div style={{
-                        display: "flex",
-                        gap: "0.5rem",
-                        alignItems: "center",
-                        flexShrink: 0, // Prevent button from shrinking
-                        width: isMobile ? "100%" : "auto",
-                        justifyContent: isMobile ? "space-between" : "flex-end"
-                      }}>
-                        <a
-                          href={upload.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            background: "rgba(31, 41, 55, 0.7)",
-                            border: "1px solid rgba(255, 255, 255, 0.2)",
-                            padding: "0.5rem",
-                            borderRadius: theme.borderRadius.md,
-                            color: theme.colors.textPrimary,
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            transition: "all 0.2s ease",
-                            width: isMobile ? "40px" : "32px",
-                            height: isMobile ? "40px" : "32px",
-                            backdropFilter: "blur(8px)",
-                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-                            flex: isMobile ? "1" : "0"
-                          }}
-                          onMouseEnter={(e) => {
-                            e.target.style.background = "rgba(31, 41, 55, 0.8)";
-                            e.target.style.borderColor = "rgba(255, 255, 255, 0.3)";
-                            e.target.style.transform = "scale(1.05)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.target.style.background = "rgba(31, 41, 55, 0.7)";
-                            e.target.style.borderColor = "rgba(255, 255, 255, 0.2)";
-                            e.target.style.transform = "scale(1)";
-                          }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                          </svg>
-                        </a>
-                        <button
-                          onClick={() => handleDelete(upload.id, upload.storagePath)}
-                          disabled={deletingFile}
-                          style={{
-                            background: "rgba(31, 41, 55, 0.7)",
-                            border: "1px solid rgba(220, 38, 38, 0.3)",
-                            color: "#DC2626",
-                            cursor: deletingFile ? "not-allowed" : "pointer",
-                            opacity: deletingFile ? 0.5 : 1,
-                            padding: "0.5rem",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            borderRadius: theme.borderRadius.md,
-                            transition: "all 0.2s ease",
-                            width: isMobile ? "40px" : "32px",
-                            height: isMobile ? "40px" : "32px",
-                            backdropFilter: "blur(8px)",
-                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-                            flex: isMobile ? "1" : "0"
-                          }}
-                          onMouseEnter={(e) => {
-                            e.target.style.background = "rgba(31, 41, 55, 0.8)";
-                            e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
-                            e.target.style.transform = "scale(1.05)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.target.style.background = "rgba(31, 41, 55, 0.7)";
-                            e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
-                            e.target.style.transform = "scale(1)";
-                          }}
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M3 6h18"/>
-                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                          </svg>
-                        </button>
-                      </div>
+                    ))}
+                  </div>
+                  {recentUploads.length > 5 && (
+                    <div style={{ 
+                      textAlign: "center", 
+                      marginTop: "1rem",
+                    }}>
+                      <button 
+                        onClick={() => setShowAllUploads(!showAllUploads)} 
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${theme.colors.primary}`,
+                          borderRadius: theme.borderRadius.md,
+                          color: theme.colors.primary,
+                          padding: "0.75rem 1.5rem",
+                          cursor: "pointer",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          transition: "all 0.2s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = "rgba(80, 70, 229, 0.1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = "transparent";
+                        }}
+                      >
+                        {showAllUploads ? "Show Less" : "See More"}
+                      </button>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               ) : (
                 <div style={{
                   color: theme.colors.textSecondary,
@@ -1156,158 +1189,189 @@ export default function Dashboard() {
                 </h3>
 
                 {analyzedBills.length > 0 ? (
-                  <div style={{ display: "grid", gap: isMobile ? "0.85rem" : "1.25rem" }}>
-                    {analyzedBills.map((bill, index) => (
-                      <div
-                        key={index}
-                        style={{
-                          background: "rgba(30, 41, 59, 0.5)",
-                          borderRadius: theme.borderRadius.lg,
-                          overflow: "hidden",
-                          border: "1px solid rgba(255, 255, 255, 0.08)",
-                          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                          transition: "all 0.3s ease",
-                          position: "relative"
-                        }}
-                      >
-                        {/* Subtle gradient overlay */}
-                        <div style={{
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          height: "4px",
-                          background: theme.colors.gradientPrimary,
-                          opacity: 0.8
-                        }} />
-                        
-                        <div style={{
-                          padding: isMobile ? "1rem" : "1.25rem",
-                          display: "flex",
-                          flexDirection: isMobile ? "column" : "row",
-                          justifyContent: "space-between",
-                          alignItems: isMobile ? "flex-start" : "center",
-                          gap: isMobile ? "1rem" : "0.5rem"
-                        }}>
+                  <>
+                    <div style={{ display: "grid", gap: isMobile ? "0.85rem" : "1.25rem" }}>
+                      {(showAllAnalyzedBills ? analyzedBills : analyzedBills.slice(0, 5)).map((bill, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            background: "rgba(30, 41, 59, 0.5)",
+                            borderRadius: theme.borderRadius.lg,
+                            overflow: "hidden",
+                            border: "1px solid rgba(255, 255, 255, 0.08)",
+                            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                            transition: "all 0.3s ease",
+                            position: "relative"
+                          }}
+                        >
+                          {/* Subtle gradient overlay */}
                           <div style={{
+                            position: "absolute",
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: "4px",
+                            background: theme.colors.gradientPrimary,
+                            opacity: 0.8
+                          }} />
+                          
+                          <div style={{
+                            padding: isMobile ? "1rem" : "1.25rem",
                             display: "flex",
-                            flexDirection: "column",
-                            gap: "0.35rem",
-                            flex: 1,
-                            minWidth: 0 // Enable text truncation
+                            flexDirection: isMobile ? "column" : "row",
+                            justifyContent: "space-between",
+                            alignItems: isMobile ? "flex-start" : "center",
+                            gap: isMobile ? "1rem" : "0.5rem"
                           }}>
                             <div style={{
-                              fontSize: "1rem",
-                              fontWeight: "600",
-                              color: theme.colors.textPrimary,
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis"
-                            }}>
-                              {bill.fileName}
-                            </div>
-                            <div style={{
-                              fontSize: "0.8rem",
-                              color: theme.colors.textSecondary,
                               display: "flex",
-                              alignItems: "center",
-                              gap: "0.35rem"
+                              flexDirection: "column",
+                              gap: "0.35rem",
+                              flex: 1,
+                              minWidth: 0 // Enable text truncation
                             }}>
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="10" />
-                                <polyline points="12 6 12 12 16 14" />
-                              </svg>
-                              {new Date(bill.analyzedAt).toLocaleDateString()}
-                            </div>
-                          </div>
-                          <div style={{
-                            display: "flex",
-                            gap: "0.75rem",
-                            alignItems: "center",
-                            flexShrink: 0,
-                            width: isMobile ? "100%" : "auto",
-                            justifyContent: isMobile ? "space-between" : "flex-end"
-                          }}>
-                            <Link
-                              href={`/analysis/${bill.id}`}
-                              style={{
-                                padding: isMobile ? "0.7rem 1.1rem" : "0.7rem 1.1rem",
-                                background: "rgba(59, 130, 246, 0.15)",
-                                color: "#60A5FA",
-                                borderRadius: theme.borderRadius.md,
-                                textDecoration: "none",
-                                fontSize: "0.875rem",
+                              <div style={{
+                                fontSize: "1rem",
                                 fontWeight: "600",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                gap: "0.5rem",
-                                transition: "all 0.2s ease",
-                                border: "1px solid rgba(59, 130, 246, 0.3)",
-                                backdropFilter: "blur(8px)",
-                                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+                                color: theme.colors.textPrimary,
                                 whiteSpace: "nowrap",
-                                flex: isMobile ? "1" : "0"
-                              }}
-                              onMouseEnter={(e) => {
-                                e.target.style.background = "rgba(59, 130, 246, 0.25)";
-                                e.target.style.borderColor = "rgba(59, 130, 246, 0.5)";
-                                e.target.style.transform = "translateY(-2px)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.target.style.background = "rgba(59, 130, 246, 0.15)";
-                                e.target.style.borderColor = "rgba(59, 130, 246, 0.3)";
-                                e.target.style.transform = "translateY(0)";
-                              }}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                                <circle cx="12" cy="12" r="3" />
-                              </svg>
-                              View
-                            </Link>
-                            <button
-                              onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
-                              disabled={deletingFile}
-                              style={{
-                                background: "rgba(220, 38, 38, 0.1)",
-                                border: "1px solid rgba(220, 38, 38, 0.2)",
-                                color: "#F87171",
-                                cursor: deletingFile ? "not-allowed" : "pointer",
-                                opacity: deletingFile ? 0.5 : 1,
-                                padding: "0.7rem",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis"
+                              }}>
+                                {bill.fileName}
+                              </div>
+                              <div style={{
+                                fontSize: "0.8rem",
+                                color: theme.colors.textSecondary,
                                 display: "flex",
                                 alignItems: "center",
-                                justifyContent: "center",
-                                borderRadius: theme.borderRadius.md,
-                                transition: "all 0.2s ease",
-                                width: isMobile ? "40px" : "40px",
-                                height: isMobile ? "40px" : "40px",
-                                backdropFilter: "blur(8px)",
-                                flexShrink: 0
-                              }}
-                              onMouseEnter={(e) => {
-                                e.target.style.background = "rgba(220, 38, 38, 0.2)";
-                                e.target.style.borderColor = "rgba(220, 38, 38, 0.4)";
-                                e.target.style.transform = "translateY(-2px)";
-                              }}
-                              onMouseLeave={(e) => {
-                                e.target.style.background = "rgba(220, 38, 38, 0.1)";
-                                e.target.style.borderColor = "rgba(220, 38, 38, 0.2)";
-                                e.target.style.transform = "translateY(0)";
-                              }}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M3 6h18"/>
-                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                              </svg>
-                            </button>
+                                gap: "0.35rem"
+                              }}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <circle cx="12" cy="12" r="10" />
+                                  <polyline points="12 6 12 12 16 14" />
+                                </svg>
+                                {new Date(bill.analyzedAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                            <div style={{
+                              display: "flex",
+                              gap: "0.75rem",
+                              alignItems: "center",
+                              flexShrink: 0,
+                              width: isMobile ? "100%" : "auto",
+                              justifyContent: isMobile ? "space-between" : "flex-end"
+                            }}>
+                              <Link
+                                href={`/analysis/${bill.id}`}
+                                style={{
+                                  padding: isMobile ? "0.7rem 1.1rem" : "0.7rem 1.1rem",
+                                  background: "rgba(59, 130, 246, 0.15)",
+                                  color: "#60A5FA",
+                                  borderRadius: theme.borderRadius.md,
+                                  textDecoration: "none",
+                                  fontSize: "0.875rem",
+                                  fontWeight: "600",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: "0.5rem",
+                                  transition: "all 0.2s ease",
+                                  border: "1px solid rgba(59, 130, 246, 0.3)",
+                                  backdropFilter: "blur(8px)",
+                                  boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+                                  whiteSpace: "nowrap",
+                                  flex: isMobile ? "1" : "0"
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.target.style.background = "rgba(59, 130, 246, 0.25)";
+                                  e.target.style.borderColor = "rgba(59, 130, 246, 0.5)";
+                                  e.target.style.transform = "translateY(-2px)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.target.style.background = "rgba(59, 130, 246, 0.15)";
+                                  e.target.style.borderColor = "rgba(59, 130, 246, 0.3)";
+                                  e.target.style.transform = "translateY(0)";
+                                }}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                                View
+                              </Link>
+                              <button
+                                onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
+                                disabled={deletingFile}
+                                style={{
+                                  background: "rgba(220, 38, 38, 0.1)",
+                                  border: "1px solid rgba(220, 38, 38, 0.2)",
+                                  color: "#F87171",
+                                  cursor: deletingFile ? "not-allowed" : "pointer",
+                                  opacity: deletingFile ? 0.5 : 1,
+                                  padding: "0.7rem",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  borderRadius: theme.borderRadius.md,
+                                  transition: "all 0.2s ease",
+                                  width: isMobile ? "40px" : "40px",
+                                  height: isMobile ? "40px" : "40px",
+                                  backdropFilter: "blur(8px)",
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.target.style.background = "rgba(220, 38, 38, 0.2)";
+                                  e.target.style.borderColor = "rgba(220, 38, 38, 0.4)";
+                                  e.target.style.transform = "translateY(-2px)";
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.target.style.background = "rgba(220, 38, 38, 0.1)";
+                                  e.target.style.borderColor = "rgba(220, 38, 38, 0.2)";
+                                  e.target.style.transform = "translateY(0)";
+                                }}
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 6h18"/>
+                                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                </svg>
+                              </button>
+                            </div>
                           </div>
                         </div>
+                      ))}
+                    </div>
+                    {analyzedBills.length > 5 && (
+                      <div style={{ 
+                        textAlign: "center", 
+                        marginTop: "1.5rem",
+                      }}>
+                        <button 
+                          onClick={() => setShowAllAnalyzedBills(!showAllAnalyzedBills)} 
+                          style={{
+                            background: "transparent",
+                            border: `1px solid ${theme.colors.primary}`,
+                            borderRadius: theme.borderRadius.md,
+                            color: theme.colors.primary,
+                            padding: "0.75rem 1.5rem",
+                            cursor: "pointer",
+                            fontSize: "0.9rem",
+                            fontWeight: "600",
+                            transition: "all 0.2s ease",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.background = "rgba(80, 70, 229, 0.1)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.background = "transparent";
+                          }}
+                        >
+                          {showAllAnalyzedBills ? "Show Less" : "See More"}
+                        </button>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 ) : (
                   <div style={{
                     textAlign: "center",
