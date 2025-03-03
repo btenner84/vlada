@@ -24,16 +24,27 @@ if (!getApps().length) {
     
     // Format the private key, handling both raw and escaped formats
     let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    
+    // If the key is wrapped in quotes, remove them
     if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
       privateKey = privateKey.slice(1, -1);
     }
+    
+    // Replace escaped newlines with actual newlines
     privateKey = privateKey.replace(/\\n/g, '\n');
+    
+    // Validate the key format
+    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----') || !privateKey.includes('-----END PRIVATE KEY-----')) {
+      console.error('Invalid private key format');
+      throw new Error('Invalid private key format');
+    }
     
     console.log('Firebase configuration:', {
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
       privateKeyLength: privateKey.length,
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      privateKeyValid: privateKey.includes('-----BEGIN PRIVATE KEY-----')
     });
     
     const app = initializeApp({
