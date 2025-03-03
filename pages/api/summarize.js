@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text } = req.body;
+    const { text, context, mode } = req.body;
     
     if (!text) {
       return res.status(400).json({ error: 'No text provided' });
@@ -16,19 +16,36 @@ export default async function handler(req, res) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    let systemPrompt, userPrompt;
+
+    if (mode === 'qa') {
+      systemPrompt = "You are a helpful medical bill expert assistant. Provide clear, concise answers to questions about medical bills. Use the provided bill context to give accurate, specific answers.";
+      userPrompt = `Using the following medical bill information as context, please answer this question:
+
+Question: ${text}
+
+Bill Context:
+${context}
+
+Please provide a clear, direct answer based on the information in the bill. If the information needed is not available in the context, say so.`;
+    } else {
+      systemPrompt = "You are a medical bill expert. Provide a clear, concise summary of the key information in medical bills.";
+      userPrompt = `Please provide a brief, clear summary of this medical bill information. Focus on key information like total amount, main services, and important dates. Keep it concise and easy to understand.
+
+Bill Information:
+${text}`;
+    }
+
     const completion = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
-          content: "You are a medical bill expert. Provide a clear, concise summary of the key information in medical bills."
+          content: systemPrompt
         },
         {
           role: "user",
-          content: `Please provide a brief, clear summary of this medical bill text. Focus on key information like total amount, main services, and important dates. Keep it concise and easy to understand.
-
-Text to summarize:
-${text}`
+          content: userPrompt
         }
       ],
       temperature: 0.3,
@@ -39,9 +56,9 @@ ${text}`
     return res.status(200).json({ summary });
 
   } catch (error) {
-    console.error('Summary generation error:', error);
+    console.error('Summary/QA generation error:', error);
     return res.status(500).json({
-      error: 'Failed to generate summary',
+      error: 'Failed to generate response',
       details: error.message
     });
   }

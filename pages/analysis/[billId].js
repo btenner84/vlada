@@ -98,6 +98,9 @@ export default function BillAnalysis() {
   const [processingMethod, setProcessingMethod] = useState(null); // server, client, or fallback
   const [analysisVersion, setAnalysisVersion] = useState(null);
   const [ocrProgress, setOcrProgress] = useState(null);
+  const [billQuestion, setBillQuestion] = useState('');
+  const [billAnswer, setBillAnswer] = useState('');
+  const [isAskingQuestion, setIsAskingQuestion] = useState(false);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -582,6 +585,55 @@ export default function BillAnalysis() {
     }
   };
 
+  // Function to handle bill questions
+  const handleAskQuestion = async () => {
+    if (!billQuestion.trim()) return;
+    
+    setIsAskingQuestion(true);
+    setBillAnswer('');
+    
+    try {
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          text: billQuestion,
+          context: JSON.stringify(extractedData),
+          mode: 'qa'
+        }),
+      });
+      
+      if (!response.ok) throw new Error('Failed to get answer');
+      const data = await response.json();
+      setBillAnswer(data.summary);
+    } catch (error) {
+      console.error('Failed to get answer:', error);
+      setBillAnswer('Sorry, I had trouble answering that question. Please try again.');
+    } finally {
+      setIsAskingQuestion(false);
+    }
+  };
+
+  useEffect(() => {
+    const generateInitialSummary = async () => {
+      if (extractedData && !extractedData.summary) {
+        try {
+          const summary = await generateSummary(JSON.stringify(extractedData));
+          setExtractedData(prev => ({
+            ...prev,
+            summary
+          }));
+        } catch (error) {
+          console.error('Failed to generate summary:', error);
+        }
+      }
+    };
+
+    generateInitialSummary();
+  }, [extractedData]);
+
   // Update the loading state check to only show the loading screen until analysis is complete
   if (isLoading || ocrProgress || !extractedData) {
     return (
@@ -896,53 +948,6 @@ export default function BillAnalysis() {
                 display: "grid",
                 gap: "2rem"
               }}>
-                {/* Confidence Score */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "1.5rem",
-                  padding: "1.5rem",
-                  background: "#0F172A",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #334155"
-                }}>
-                  <div style={{
-                    width: "64px",
-                    height: "64px",
-                    borderRadius: "50%",
-                    background: "conic-gradient(#10B981 ${(extractedData?.confidence || 0) * 100}%, #1E293B 0)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}>
-                    <div style={{
-                      width: "56px",
-                      height: "56px",
-                      borderRadius: "50%",
-                      background: "#0F172A",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "1.125rem",
-                      fontWeight: "600",
-                      color: "#10B981"
-                    }}>
-                      {Math.round((extractedData?.confidence || 0) * 100)}%
-                    </div>
-                  </div>
-                  <div>
-                    <h3 style={{
-                      fontSize: "1.125rem",
-                      fontWeight: "600",
-                      marginBottom: "0.5rem"
-                    }}>AI Confidence Score</h3>
-                    <p style={{
-                      color: "#94A3B8",
-                      fontSize: "0.875rem"
-                    }}>Our AI system's confidence in the accuracy of extracted information</p>
-                  </div>
-                </div>
-
                 {/* Key Findings */}
                 <div style={{
                   padding: "1.5rem",
@@ -972,39 +977,141 @@ export default function BillAnalysis() {
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                         <polyline points="22 4 12 14.01 9 11.01"/>
                       </svg>
-                      <span style={{ color: "#10B981" }}>Valid medical bill format detected</span>
+                      <span style={{ color: "#10B981" }}>{extractedData?.services?.length || 0} Billable Services Identified</span>
                     </div>
+                    {extractedData?.services?.map((service, index) => (
+                      <div key={index} style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "0.75rem",
+                        background: "rgba(59, 130, 246, 0.1)",
+                        borderRadius: "0.5rem",
+                        border: "1px solid rgba(59, 130, 246, 0.2)"
+                      }}>
+                        <span style={{ color: "#3B82F6" }}>{service.description}</span>
+                        <span style={{ color: "#3B82F6", fontWeight: "600" }}>{service.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* AI Generated Summary */}
+                <div style={{
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <h3 style={{
+                    fontSize: "1.125rem",
+                    fontWeight: "600",
+                    marginBottom: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem"
+                  }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/>
+                      <line x1="12" y1="16" x2="12" y2="12"/>
+                      <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    AI Generated Summary
+                  </h3>
+                  <div style={{
+                    color: "#94A3B8",
+                    lineHeight: "1.6",
+                    whiteSpace: "pre-wrap"
+                  }}>
+                    {extractedData?.summary || "Generating summary..."}
+                  </div>
+                </div>
+
+                {/* Ask AI About Your Bill */}
+                <div style={{
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <h3 style={{
+                    fontSize: "1.125rem",
+                    fontWeight: "600",
+                    marginBottom: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem"
+                  }}>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/>
+                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                      <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    Ask AI About Your Bill
+                  </h3>
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "1rem"
+                  }}>
                     <div style={{
                       display: "flex",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      padding: "0.75rem",
-                      background: "rgba(59, 130, 246, 0.1)",
-                      borderRadius: "0.5rem",
-                      border: "1px solid rgba(59, 130, 246, 0.2)"
+                      gap: "0.5rem"
                     }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="16" x2="12" y2="12"/>
-                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                      </svg>
-                      <span style={{ color: "#3B82F6" }}>{extractedData?.services?.length || 0} billable services identified</span>
+                      <input
+                        type="text"
+                        value={billQuestion}
+                        onChange={(e) => setBillQuestion(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
+                        placeholder="Ask a question about your bill..."
+                        style={{
+                          flex: 1,
+                          padding: "0.75rem 1rem",
+                          background: "#1E293B",
+                          border: "1px solid #334155",
+                          borderRadius: "0.5rem",
+                          color: "#E2E8F0",
+                          fontSize: "0.875rem"
+                        }}
+                      />
+                      <button 
+                        onClick={handleAskQuestion}
+                        disabled={isAskingQuestion || !billQuestion.trim()}
+                        style={{
+                          padding: "0.75rem 1.5rem",
+                          background: "#3B82F6",
+                          border: "none",
+                          borderRadius: "0.5rem",
+                          color: "white",
+                          fontWeight: "500",
+                          cursor: billQuestion.trim() ? "pointer" : "not-allowed",
+                          opacity: billQuestion.trim() ? 1 : 0.7,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem"
+                        }}
+                      >
+                        {isAskingQuestion ? (
+                          <div style={{ width: "16px", height: "16px", border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                          </svg>
+                        )}
+                        {isAskingQuestion ? "Thinking..." : "Ask"}
+                      </button>
                     </div>
                     <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      padding: "0.75rem",
-                      background: "rgba(249, 115, 22, 0.1)",
+                      padding: "1rem",
+                      background: "#1E293B",
                       borderRadius: "0.5rem",
-                      border: "1px solid rgba(249, 115, 22, 0.2)"
+                      color: "#94A3B8",
+                      fontSize: "0.875rem",
+                      minHeight: "100px",
+                      whiteSpace: "pre-wrap"
                     }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="8" x2="12" y2="12"/>
-                        <line x1="12" y1="16" x2="12.01" y2="16"/>
-                      </svg>
-                      <span style={{ color: "#F97316" }}>Insurance coverage verification required</span>
+                      {billAnswer || "Ask any questions about your bill and our AI will help you understand it better."}
                     </div>
                   </div>
                 </div>
