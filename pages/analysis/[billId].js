@@ -83,6 +83,7 @@ export default function BillAnalysis() {
   const router = useRouter();
   const { billId } = router.query;
   const [user, setUser] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [billData, setBillData] = useState(null);
@@ -102,9 +103,18 @@ export default function BillAnalysis() {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
         setUser(user);
-        if (billId) {
-          await fetchBillData(billId, user);
-          await fetchAnalysisVersions(billId);
+        // Fetch user profile
+        try {
+          const profileDoc = await getDoc(doc(db, 'userProfiles', user.uid));
+          if (profileDoc.exists()) {
+            setUserProfile(profileDoc.data());
+          }
+          if (billId) {
+            await fetchBillData(billId, user);
+            await fetchAnalysisVersions(billId);
+          }
+        } catch (error) {
+          console.error('Error fetching profile:', error);
         }
       } else {
         router.push('/signin');
@@ -259,6 +269,10 @@ export default function BillAnalysis() {
       // Create the new analysis document
       const newAnalysisRef = doc(analysesRef, versionId);
       
+      // Get user profile data for insurance info
+      const userProfileDoc = await getDoc(doc(db, 'userProfiles', currentUser.uid));
+      const userProfileData = userProfileDoc.exists() ? userProfileDoc.data() : null;
+      
       // Prepare the request body
       const requestBody = {
         billId: billData.id,
@@ -316,7 +330,13 @@ export default function BillAnalysis() {
         await setDoc(newAnalysisRef, {
           status: 'analyzed',
           analyzedAt: serverTimestamp(),
-          extractedData: data.extractedData || {},
+          extractedData: {
+            ...data.extractedData,
+            insuranceInfo: {
+              ...data.extractedData?.insuranceInfo,
+              type: userProfileData?.insurance?.type || 'Not found'
+            }
+          },
           extractedText: data.extractedText,
           isMedicalBill: data.isMedicalBill,
           confidence: data.confidence,
@@ -328,7 +348,13 @@ export default function BillAnalysis() {
         // Also update the main bill document
         await updateDoc(doc(db, 'bills', billData.id), {
           analyzedAt: serverTimestamp(),
-          extractedData: data.extractedData || {},
+          extractedData: {
+            ...data.extractedData,
+            insuranceInfo: {
+              ...data.extractedData?.insuranceInfo,
+              type: userProfileData?.insurance?.type || 'Not found'
+            }
+          },
           isMedicalBill: data.isMedicalBill,
           confidence: data.confidence,
           status: 'analyzed'
@@ -384,7 +410,13 @@ export default function BillAnalysis() {
             await setDoc(newAnalysisRef, {
               status: 'analyzed',
               analyzedAt: serverTimestamp(),
-              extractedData: result,
+              extractedData: {
+                ...result,
+                insuranceInfo: {
+                  ...result?.insuranceInfo,
+                  type: userProfileData?.insurance?.type || 'Not found'
+                }
+              },
               extractedText: result.extractedText,
               isMedicalBill: result.isMedicalBill,
               confidence: result.confidence,
@@ -396,7 +428,13 @@ export default function BillAnalysis() {
             // Also update the main bill document
             await updateDoc(doc(db, 'bills', billData.id), {
               analyzedAt: serverTimestamp(),
-              extractedData: result,
+              extractedData: {
+                ...result,
+                insuranceInfo: {
+                  ...result?.insuranceInfo,
+                  type: userProfileData?.insurance?.type || 'Not found'
+                }
+              },
               isMedicalBill: result.isMedicalBill,
               confidence: result.confidence,
               status: 'analyzed'
@@ -462,7 +500,13 @@ export default function BillAnalysis() {
           await setDoc(newAnalysisRef, {
             status: 'analyzed',
             analyzedAt: serverTimestamp(),
-            extractedData: dummyData,
+            extractedData: {
+              ...dummyData,
+              insuranceInfo: {
+                ...dummyData.insuranceInfo,
+                type: userProfileData?.insurance?.type || 'Not found'
+              }
+            },
             extractedText: fallbackText,
             isMedicalBill: false,
             confidence: 0,
@@ -474,7 +518,13 @@ export default function BillAnalysis() {
           // Also update the main bill document
           await updateDoc(doc(db, 'bills', billData.id), {
             analyzedAt: serverTimestamp(),
-            extractedData: dummyData,
+            extractedData: {
+              ...dummyData,
+              insuranceInfo: {
+                ...dummyData.insuranceInfo,
+                type: userProfileData?.insurance?.type || 'Not found'
+              }
+            },
             isMedicalBill: false,
             confidence: 0,
             status: 'analyzed'
@@ -690,7 +740,7 @@ export default function BillAnalysis() {
           gap: "1.5rem",
           marginBottom: "2rem"
         }}>
-          {/* Total Amount */}
+          {/* Patient Name */}
           <div style={{
             background: "#1E293B",
             padding: "1.5rem",
@@ -700,29 +750,49 @@ export default function BillAnalysis() {
             flexDirection: "column",
             gap: "0.5rem"
           }}>
-            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Total Amount</div>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Patient Name</div>
+            <div style={{ 
+              fontSize: "1.5rem", 
+              fontWeight: "600"
+            }}>
+              {extractedData?.patientInfo?.fullName || user?.displayName || 'Not found'}
+            </div>
+          </div>
+
+          {/* Insurance Coverage */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Insurance Coverage</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
+              {extractedData?.insuranceInfo?.amountCovered || 
+               (userProfile?.insurance?.type ? `${userProfile.insurance.type.replace(/_/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}` : '-')}
+            </div>
+          </div>
+
+          {/* Total Billed Amount */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Total Billed Amount</div>
             <div style={{ 
               fontSize: "1.5rem", 
               fontWeight: "600",
               color: "#10B981" 
             }}>
               {extractedData?.billInfo?.totalAmount || '-'}
-            </div>
-          </div>
-
-          {/* Service Date */}
-          <div style={{
-            background: "#1E293B",
-            padding: "1.5rem",
-            borderRadius: "0.75rem",
-            border: "1px solid #334155",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.5rem"
-          }}>
-            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Service Date</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
-              {extractedData?.billInfo?.serviceDates || '-'}
             </div>
           </div>
 
@@ -739,22 +809,6 @@ export default function BillAnalysis() {
             <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Due Date</div>
             <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
               {extractedData?.billInfo?.dueDate || '-'}
-            </div>
-          </div>
-
-          {/* Insurance Coverage */}
-          <div style={{
-            background: "#1E293B",
-            padding: "1.5rem",
-            borderRadius: "0.75rem",
-            border: "1px solid #334155",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.5rem"
-          }}>
-            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Insurance Coverage</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
-              {extractedData?.insuranceInfo?.amountCovered || '-'}
             </div>
           </div>
         </div>
@@ -1081,59 +1135,6 @@ export default function BillAnalysis() {
             flexDirection: "column",
             gap: "2rem"
           }}>
-            {/* Patient Information */}
-            <div style={{
-              background: "#1E293B",
-              borderRadius: "0.75rem",
-              padding: "2rem",
-              border: "1px solid #334155"
-            }}>
-              <h2 style={{
-                fontSize: "1.5rem",
-                fontWeight: "600",
-                marginBottom: "1.5rem"
-              }}>Patient Information</h2>
-              
-              <div style={{ display: "grid", gap: "1rem" }}>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 2fr",
-                  gap: "1rem",
-                  padding: "1rem",
-                  background: "#0F172A",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #334155"
-                }}>
-                  <div style={{ color: "#94A3B8" }}>Name</div>
-                  <div>{extractedData?.patientInfo?.fullName || '-'}</div>
-                </div>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 2fr",
-                  gap: "1rem",
-                  padding: "1rem",
-                  background: "#0F172A",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #334155"
-                }}>
-                  <div style={{ color: "#94A3B8" }}>DOB</div>
-                  <div>{extractedData?.patientInfo?.dateOfBirth || '-'}</div>
-                </div>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 2fr",
-                  gap: "1rem",
-                  padding: "1rem",
-                  background: "#0F172A",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #334155"
-                }}>
-                  <div style={{ color: "#94A3B8" }}>Account</div>
-                  <div>{extractedData?.patientInfo?.accountNumber || '-'}</div>
-                </div>
-              </div>
-            </div>
-
             {/* Actions */}
             <div style={{
               background: "#1E293B",
@@ -1220,6 +1221,59 @@ export default function BillAnalysis() {
                 </button>
               </div>
             </div>
+
+            {/* Patient Information */}
+            <div style={{
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              padding: "2rem",
+              border: "1px solid #334155"
+            }}>
+              <h2 style={{
+                fontSize: "1.5rem",
+                fontWeight: "600",
+                marginBottom: "1.5rem"
+              }}>Patient Information</h2>
+              
+              <div style={{ display: "grid", gap: "1rem" }}>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Name</div>
+                  <div>{extractedData?.patientInfo?.fullName || '-'}</div>
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>DOB</div>
+                  <div>{extractedData?.patientInfo?.dateOfBirth || '-'}</div>
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Account</div>
+                  <div>{extractedData?.patientInfo?.accountNumber || '-'}</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1275,7 +1329,7 @@ export default function BillAnalysis() {
           }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11-8-11-8z"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
           View Raw OCR Text
