@@ -2,36 +2,39 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
 
-// Enhanced private key formatting function
+// Improved private key formatting function for Node.js v22+
 const formatPrivateKey = (key) => {
   if (!key) {
     console.error('FIREBASE_PRIVATE_KEY is missing or empty');
     return '';
   }
   
-  // Handle multiple possible formats of the key
-  // 1. Key with literal \n characters that need to be replaced
-  // 2. Key with actual newlines
-  // 3. Key with escaped newlines from JSON stringification
-  let formattedKey = key;
-  
-  // Replace literal \n with actual newlines
-  if (formattedKey.includes('\\n')) {
-    formattedKey = formattedKey.replace(/\\n/g, '\n');
-  }
-  
-  // Handle JSON escaped newlines
   try {
-    // If the key is JSON stringified with escape characters
+    // First, handle JSON escaped strings
+    let formattedKey = key;
     if (formattedKey.startsWith('"') && formattedKey.endsWith('"')) {
-      formattedKey = JSON.parse(formattedKey);
+      try {
+        formattedKey = JSON.parse(formattedKey);
+      } catch (e) {
+        console.warn('Failed to parse private key as JSON string');
+      }
     }
-  } catch (e) {
-    // Not a JSON string, continue with current value
-    console.warn('Private key is not a JSON string:', e.message);
+    
+    // Then, replace literal \n with actual newlines
+    if (formattedKey.includes('\\n')) {
+      formattedKey = formattedKey.replace(/\\n/g, '\n');
+    }
+    
+    // Ensure the key has the correct PEM format
+    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
+      console.error('Private key does not have the expected PEM format');
+    }
+    
+    return formattedKey;
+  } catch (error) {
+    console.error('Error formatting private key:', error);
+    return key; // Return original key as fallback
   }
-  
-  return formattedKey;
 };
 
 // Enhanced initialization with better error handling and logging
