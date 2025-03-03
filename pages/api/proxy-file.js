@@ -9,14 +9,32 @@ let adminStorage;
 if (!getApps().length) {
   console.log('Initializing Firebase Admin SDK...');
   try {
-    // Make sure to properly format the private key
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY
-      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      : undefined;
+    // Make sure all required environment variables are present
+    const requiredEnvVars = [
+      'FIREBASE_PROJECT_ID',
+      'FIREBASE_CLIENT_EMAIL',
+      'FIREBASE_PRIVATE_KEY',
+      'FIREBASE_STORAGE_BUCKET'
+    ];
     
-    console.log('Firebase Project ID:', process.env.FIREBASE_PROJECT_ID);
-    console.log('Firebase Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
-    console.log('Firebase Private Key (first 20 chars):', privateKey ? privateKey.substring(0, 20) + '...' : 'undefined');
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    if (missingVars.length > 0) {
+      throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+    }
+    
+    // Format the private key, handling both raw and escaped formats
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      privateKey = privateKey.slice(1, -1);
+    }
+    privateKey = privateKey.replace(/\\n/g, '\n');
+    
+    console.log('Firebase configuration:', {
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKeyLength: privateKey.length,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET
+    });
     
     const app = initializeApp({
       credential: cert({
@@ -32,7 +50,11 @@ if (!getApps().length) {
     console.log('Firebase Admin SDK initialized successfully');
   } catch (error) {
     console.error('Error initializing Firebase Admin SDK:', error);
-    // Don't throw here, we'll handle the error in the handler
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code
+    });
   }
 } else {
   console.log('Firebase Admin SDK already initialized');
@@ -43,7 +65,8 @@ if (!getApps().length) {
 export default async function handler(req, res) {
   console.log('API Route: /api/proxy-file - Request received');
   console.log('Request Method:', req.method);
-  console.log('Request Query:', req.query);
+  console.log('Request Query:', JSON.stringify(req.query));
+  console.log('Request Headers:', JSON.stringify(req.headers));
   
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);

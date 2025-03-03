@@ -12,9 +12,11 @@ export async function getClientWorker(progressHandler = null) {
       errorHandler: console.error
     });
     
+    console.log('Loading language...');
     await clientWorker.loadLanguage('eng');
-    await clientWorker.initialize('eng');
-    await clientWorker.setParameters({
+    
+    console.log('Initializing worker with parameters...');
+    await clientWorker.initialize('eng', {
       tessedit_ocr_engine_mode: 1,
       preserve_interword_spaces: 1,
       tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/\\ '
