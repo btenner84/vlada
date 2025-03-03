@@ -834,23 +834,6 @@ export default function BillAnalysis() {
             </div>
           </div>
 
-          {/* Insurance Coverage */}
-          <div style={{
-            background: "#1E293B",
-            padding: "1.5rem",
-            borderRadius: "0.75rem",
-            border: "1px solid #334155",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.5rem"
-          }}>
-            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Insurance Coverage</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
-              {extractedData?.insuranceInfo?.amountCovered || 
-               (userProfile?.insurance?.type ? `${userProfile.insurance.type.replace(/_/g, ' ').split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}` : '-')}
-            </div>
-          </div>
-
           {/* Total Billed Amount */}
           <div style={{
             background: "#1E293B",
@@ -868,6 +851,22 @@ export default function BillAnalysis() {
               color: "#10B981" 
             }}>
               {extractedData?.billInfo?.totalAmount || '-'}
+            </div>
+          </div>
+
+          {/* Date of Service */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Date of Service</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
+              {extractedData?.billInfo?.serviceDates || '-'}
             </div>
           </div>
 
@@ -971,6 +970,96 @@ export default function BillAnalysis() {
                 display: "grid",
                 gap: "2rem"
               }}>
+                {/* Ask AI Section */}
+                <div style={{
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <h3 style={{
+                    fontSize: "1.25rem",
+                    fontWeight: "600",
+                    marginBottom: "1.5rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem"
+                  }}>
+                    <span>Ask AI About Your Bill</span>
+                    <span style={{
+                      padding: "0.25rem 0.75rem",
+                      background: "rgba(59, 130, 246, 0.1)",
+                      color: "#3B82F6",
+                      borderRadius: "1rem",
+                      fontSize: "0.875rem",
+                      fontWeight: "500"
+                    }}>Beta</span>
+                  </h3>
+
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "1rem"
+                  }}>
+                    <div style={{
+                      display: "flex",
+                      gap: "0.5rem"
+                    }}>
+                      <input
+                        type="text"
+                        value={billQuestion}
+                        onChange={(e) => setBillQuestion(e.target.value)}
+                        placeholder="Ask a question about your bill..."
+                        style={{
+                          flex: 1,
+                          padding: "0.75rem 1rem",
+                          background: "#1E293B",
+                          border: "1px solid #334155",
+                          borderRadius: "0.5rem",
+                          color: "#E2E8F0",
+                          fontSize: "0.875rem"
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleAskQuestion();
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={handleAskQuestion}
+                        disabled={isAskingQuestion || !billQuestion.trim()}
+                        style={{
+                          padding: "0.75rem 1.5rem",
+                          background: "#3B82F6",
+                          border: "none",
+                          borderRadius: "0.5rem",
+                          color: "white",
+                          fontWeight: "500",
+                          cursor: isAskingQuestion || !billQuestion.trim() ? "not-allowed" : "pointer",
+                          opacity: isAskingQuestion || !billQuestion.trim() ? 0.7 : 1
+                        }}
+                      >
+                        {isAskingQuestion ? "Thinking..." : "Ask"}
+                      </button>
+                    </div>
+
+                    {billAnswer && (
+                      <div style={{
+                        padding: "1rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155",
+                        fontSize: "0.875rem",
+                        lineHeight: "1.5",
+                        whiteSpace: "pre-wrap"
+                      }}>
+                        {billAnswer}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Key Findings */}
                 <div style={{
                   padding: "1.5rem",
@@ -1016,126 +1105,6 @@ export default function BillAnalysis() {
                         <span style={{ color: "#3B82F6", fontWeight: "600" }}>{service.amount}</span>
                       </div>
                     ))}
-                  </div>
-                </div>
-
-                {/* AI Generated Summary */}
-                <div style={{
-                  padding: "1.5rem",
-                  background: "#0F172A",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #334155"
-                }}>
-                  <h3 style={{
-                    fontSize: "1.125rem",
-                    fontWeight: "600",
-                    marginBottom: "1rem",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem"
-                  }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                      <line x1="12" y1="16" x2="12" y2="12"/>
-                      <line x1="12" y1="8" x2="12.01" y2="8"/>
-                    </svg>
-                    AI Generated Summary
-                  </h3>
-                  <div style={{
-                    color: "#94A3B8",
-                    lineHeight: "1.6",
-                    whiteSpace: "pre-wrap"
-                  }}>
-                    {extractedData?.summary || "Generating summary..."}
-                  </div>
-                </div>
-
-                {/* Ask AI About Your Bill */}
-                <div style={{
-                  padding: "1.5rem",
-                  background: "#0F172A",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #334155"
-                }}>
-                  <h3 style={{
-                    fontSize: "1.125rem",
-                    fontWeight: "600",
-                    marginBottom: "1rem",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem"
-                  }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                      <line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                    Ask AI About Your Bill
-                  </h3>
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1rem"
-                  }}>
-                    <div style={{
-                      display: "flex",
-                      gap: "0.5rem"
-                    }}>
-                      <input
-                        type="text"
-                        value={billQuestion}
-                        onChange={(e) => setBillQuestion(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
-                        placeholder="Ask a question about your bill..."
-                        style={{
-                          flex: 1,
-                          padding: "0.75rem 1rem",
-                          background: "#1E293B",
-                          border: "1px solid #334155",
-                          borderRadius: "0.5rem",
-                          color: "#E2E8F0",
-                          fontSize: "0.875rem"
-                        }}
-                      />
-                      <button 
-                        onClick={handleAskQuestion}
-                        disabled={isAskingQuestion || !billQuestion.trim()}
-                        style={{
-                          padding: "0.75rem 1.5rem",
-                          background: "#3B82F6",
-                          border: "none",
-                          borderRadius: "0.5rem",
-                          color: "white",
-                          fontWeight: "500",
-                          cursor: billQuestion.trim() ? "pointer" : "not-allowed",
-                          opacity: billQuestion.trim() ? 1 : 0.7,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem"
-                        }}
-                      >
-                        {isAskingQuestion ? (
-                          <div style={{ width: "16px", height: "16px", border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="22" y1="2" x2="11" y2="13"/>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                          </svg>
-                        )}
-                        {isAskingQuestion ? "Thinking..." : "Ask"}
-                      </button>
-                    </div>
-                    <div style={{
-                      padding: "1rem",
-                      background: "#1E293B",
-                      borderRadius: "0.5rem",
-                      color: "#94A3B8",
-                      fontSize: "0.875rem",
-                      minHeight: "100px",
-                      whiteSpace: "pre-wrap"
-                    }}>
-                      {billAnswer || "Ask any questions about your bill and our AI will help you understand it better."}
-                    </div>
                   </div>
                 </div>
 
