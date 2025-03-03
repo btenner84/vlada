@@ -731,33 +731,84 @@ export default function BillAnalysis() {
               )}
             </div>
 
-            {/* Raw Text */}
-            <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold mb-4">Raw Text</h2>
-              <div className="flex justify-between items-center mb-2">
-                <div className="text-sm text-gray-500">
-                  {processingMethod && (
-                    <span>Processed using: <span className="font-medium">{processingMethod}</span> method</span>
-                  )}
+            {/* Raw Text Section */}
+            <div style={{
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              padding: "2rem",
+              border: "1px solid #334155",
+              marginBottom: "1.5rem"
+            }}>
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: "1rem"
+              }}>
+                <h2 style={{
+                  fontSize: "1.5rem",
+                  fontWeight: "600",
+                  color: "#E2E8F0"
+                }}>Raw Text</h2>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div style={{ color: "#94A3B8", fontSize: "0.9rem", marginRight: "1rem" }}>
+                    {processingMethod && (
+                      <span>Processed using: <span style={{ fontWeight: "500" }}>{processingMethod}</span> method</span>
+                    )}
+                  </div>
+                  <div style={{ color: "#94A3B8", fontSize: "0.9rem", marginRight: "1rem" }}>
+                    {rawData?.extractedText && (
+                      <span>Length: {rawData.extractedText.length} chars</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      console.log('Raw text debug:', rawData?.extractedText);
+                      alert(`Raw text length: ${rawData?.extractedText?.length || 0} characters`);
+                    }}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      background: "#4B5563",
+                      color: "#E2E8F0",
+                      border: "none",
+                      borderRadius: "0.5rem",
+                      cursor: "pointer",
+                      fontSize: "0.9rem"
+                    }}
+                  >
+                    Debug
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(rawData?.extractedText || '')}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      background: "#3B82F6",
+                      color: "#E2E8F0",
+                      border: "none",
+                      borderRadius: "0.5rem",
+                      cursor: "pointer",
+                      fontSize: "0.9rem"
+                    }}
+                  >
+                    Copy
+                  </button>
                 </div>
-                <div className="text-sm text-gray-500">
-                  {rawData?.extractedText && (
-                    <span>Text length: {rawData.extractedText.length} characters</span>
-                  )}
-                </div>
-                <button
-                  className="text-sm bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1 rounded"
-                  onClick={() => {
-                    console.log('Raw text debug:', rawData?.extractedText);
-                    alert(`Raw text length: ${rawData?.extractedText?.length || 0} characters`);
-                  }}
-                >
-                  Debug
-                </button>
               </div>
-              <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto whitespace-pre-wrap">
+              <pre style={{
+                background: "#0F172A",
+                padding: "1.5rem",
+                borderRadius: "0.75rem",
+                color: "#94A3B8",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                maxHeight: "300px",
+                overflowY: "auto",
+                fontSize: "0.9rem",
+                lineHeight: "1.6",
+                border: "1px solid #334155"
+              }}>
                 {rawData?.extractedText || 'No text extracted yet'}
-              </div>
+              </pre>
             </div>
           </div>
         </div>

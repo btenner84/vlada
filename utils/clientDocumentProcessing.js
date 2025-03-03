@@ -285,27 +285,45 @@ function convertToProxyUrl(fileUrl) {
       
       if (pathMatch && pathMatch[1]) {
         const encodedPath = pathMatch[1];
+        const decodedPath = decodeURIComponent(encodedPath);
+        console.log('Decoded Firebase path:', decodedPath);
+        
         // Extract userId and billId from the path if possible
-        const pathParts = decodeURIComponent(encodedPath).split('/');
+        const pathParts = decodedPath.split('/');
+        console.log('Path parts:', pathParts);
         
         if (pathParts.length >= 2 && pathParts[0] === 'bills') {
           const userId = pathParts[1];
+          
           // The billId might be part of the filename or a separate path component
-          const billIdMatch = pathParts[2]?.match(/(\d+)_(\w+)/);
-          const billId = billIdMatch ? billIdMatch[2] : null;
+          // Format is typically: timestamp_billId or just billId
+          let billId = null;
+          if (pathParts.length > 2) {
+            const filenameMatch = pathParts[2].match(/\d+_([^\.]+)/);
+            if (filenameMatch && filenameMatch[1]) {
+              billId = filenameMatch[1];
+            }
+          }
+          
+          console.log('Extracted userId:', userId);
+          console.log('Extracted billId:', billId);
           
           // Construct the proxy URL with userId and billId if available
           const origin = window.location.origin;
           const proxyUrl = `${origin}/api/proxy-file?path=${encodedPath}${userId ? `&userId=${userId}` : ''}${billId ? `&billId=${billId}` : ''}`;
+          console.log('Generated proxy URL:', proxyUrl);
           return proxyUrl;
         }
         
         // If we can't extract userId and billId, just use the path
-        return `${window.location.origin}/api/proxy-file?path=${encodedPath}`;
+        const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodedPath}`;
+        console.log('Generated simple proxy URL:', proxyUrl);
+        return proxyUrl;
       }
     }
     
     // If it's not a Firebase Storage URL or we can't parse it, return the original URL
+    console.log('Not a Firebase Storage URL, using original:', fileUrl);
     return fileUrl;
   } catch (error) {
     console.error('Error converting to proxy URL:', error);

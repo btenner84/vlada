@@ -32,7 +32,7 @@ if (!getApps().length) {
     console.log('Firebase Admin SDK initialized successfully');
   } catch (error) {
     console.error('Error initializing Firebase Admin SDK:', error);
-    throw new Error(`Firebase initialization error: ${error.message}`);
+    // Don't throw here, we'll handle the error in the handler
   }
 } else {
   console.log('Firebase Admin SDK already initialized');
@@ -43,6 +43,7 @@ if (!getApps().length) {
 export default async function handler(req, res) {
   console.log('API Route: /api/proxy-file - Request received');
   console.log('Request Method:', req.method);
+  console.log('Request Query:', req.query);
   
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -70,10 +71,17 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Check if Firebase Admin SDK is initialized
+    if (!adminStorage) {
+      console.error('Firebase Admin SDK not initialized');
+      return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
+    }
+    
     // Get the file path from the query parameters
     const { path, userId, billId } = req.query;
     
     if (!path) {
+      console.log('Missing file path parameter');
       return res.status(400).json({ error: 'Missing file path parameter' });
     }
     
@@ -95,37 +103,64 @@ export default async function handler(req, res) {
       }
     }
     
-    // Get the file from Firebase Storage
-    const bucket = adminStorage.bucket();
-    const file = bucket.file(decodeURIComponent(path));
-    
-    // Check if the file exists
-    const [exists] = await file.exists();
-    if (!exists) {
-      console.log('File not found:', path);
-      return res.status(404).json({ error: 'File not found' });
+    try {
+      // Get the file from Firebase Storage
+      const bucket = adminStorage.bucket();
+      console.log('Storage bucket:', bucket.name);
+      
+      // Decode the path and remove any leading slashes
+      const decodedPath = decodeURIComponent(path).replace(/^\/+/, '');
+      console.log('Decoded path:', decodedPath);
+      
+      const file = bucket.file(decodedPath);
+      console.log('File reference created:', file.name);
+      
+      // Check if the file exists
+      console.log('Checking if file exists...');
+      const [exists] = await file.exists();
+      if (!exists) {
+        console.log('File not found:', decodedPath);
+        return res.status(404).json({ error: 'File not found' });
+      }
+      console.log('File exists');
+      
+      // Get the file metadata to determine content type
+      console.log('Getting file metadata...');
+      const [metadata] = await file.getMetadata();
+      console.log('File metadata:', {
+        contentType: metadata.contentType,
+        size: metadata.size,
+        updated: metadata.updated
+      });
+      
+      const contentType = metadata.contentType || 'application/octet-stream';
+      
+      // Set the content type header
+      res.setHeader('Content-Type', contentType);
+      
+      // Stream the file to the response
+      console.log('Streaming file to response');
+      const fileStream = file.createReadStream();
+      
+      fileStream.on('error', (error) => {
+        console.error('Error streaming file:', error);
+        // Only send response if headers haven't been sent yet
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Error streaming file' });
+        }
+      });
+      
+      fileStream.on('end', () => {
+        console.log('File streaming completed');
+      });
+      
+      fileStream.pipe(res);
+    } catch (storageError) {
+      console.error('Firebase Storage error:', storageError);
+      return res.status(500).json({ error: `Firebase Storage error: ${storageError.message}` });
     }
-    
-    // Get the file metadata to determine content type
-    const [metadata] = await file.getMetadata();
-    const contentType = metadata.contentType || 'application/octet-stream';
-    
-    // Set the content type header
-    res.setHeader('Content-Type', contentType);
-    
-    // Stream the file to the response
-    console.log('Streaming file to response');
-    const fileStream = file.createReadStream();
-    
-    fileStream.on('error', (error) => {
-      console.error('Error streaming file:', error);
-      res.status(500).json({ error: 'Error streaming file' });
-    });
-    
-    fileStream.pipe(res);
-    
   } catch (error) {
     console.error('Error proxying file:', error);
-    res.status(500).json({ error: error.message || 'Error proxying file' });
+    return res.status(500).json({ error: error.message || 'Error proxying file' });
   }
 } 
