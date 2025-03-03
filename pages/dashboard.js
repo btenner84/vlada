@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { auth } from '../firebase';
 import { theme } from '../styles/theme';
@@ -25,22 +25,116 @@ export default function Dashboard() {
   const [analyzedBills, setAnalyzedBills] = useState([]);
   const [editingFileName, setEditingFileName] = useState(null);
   const [newFileName, setNewFileName] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const fetchUploads = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const q = query(
+        collection(db, 'bills'),
+        where('userId', '==', user.uid),
+        orderBy('timestamp', 'desc')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const uploads = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log('Raw bill data:', data); // Log raw data
+        return {
+          id: doc.id,
+          fileName: data.fileName,
+          uploadedAt: data.uploadedAt?.toDate().toLocaleString() || new Date().toLocaleString(),
+          fileUrl: data.fileUrl,
+          storagePath: data.storagePath || `bills/${user.uid}/${data.timestamp}_${data.fileName}` // Fallback if storagePath is missing
+        };
+      });
+
+      console.log('Processed uploads:', uploads); // Log processed data
+      setRecentUploads(uploads);
+    } catch (error) {
+      console.error('Error fetching uploads:', error);
+    }
+  }, [user]);
+
+  const fetchAnalyzedBills = useCallback(async () => {
+    if (!user) return;
+
+    console.log('Fetching analyzed bills for user:', user.uid);
+    try {
+      // Simpler query that doesn't require a composite index
+      const q = query(
+        collection(db, 'bills'),
+        where('userId', '==', user.uid)
+      );
+
+      const querySnapshot = await getDocs(q);
+      console.log('Found bills:', querySnapshot.size);
+      
+      const bills = querySnapshot.docs
+        .map(doc => {
+          const data = doc.data();
+          console.log('Processing bill:', doc.id, data);
+          
+          // Only include bills that have been analyzed
+          if (!data.analyzedAt) return null;
+
+          // Convert timestamps to dates if needed
+          let analyzedAt = data.analyzedAt;
+          if (data.analyzedAt && typeof data.analyzedAt.toDate === 'function') {
+            analyzedAt = data.analyzedAt.toDate().toISOString();
+          }
+
+          return {
+            id: doc.id,
+            fileName: data.fileName,
+            analyzedAt: analyzedAt,
+            isMedicalBill: data.isMedicalBill,
+            confidence: data.confidence,
+            totalAmount: data.extractedData?.billInfo?.totalAmount || 'N/A',
+            serviceDates: data.extractedData?.billInfo?.serviceDates || 'N/A'
+          };
+        })
+        .filter(bill => bill !== null)
+        .sort((a, b) => {
+          // Sort by analyzedAt date in descending order
+          const dateA = new Date(a.analyzedAt);
+          const dateB = new Date(b.analyzedAt);
+          return dateB - dateA;
+        });
+
+      console.log('Setting analyzed bills:', bills);
+      setAnalyzedBills(bills);
+    } catch (error) {
+      console.error('Error fetching analyzed bills:', error);
+    }
+  }, [user]);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      console.log('Auth state changed:', user ? 'logged in' : 'logged out');
       if (user) {
         setUser(user);
         // Fetch user profile
         try {
+          console.log('Fetching user profile...');
           const profileDoc = await getDoc(doc(db, 'userProfiles', user.uid));
           if (profileDoc.exists()) {
             setUserProfile(profileDoc.data());
+            // Fetch bills after profile is loaded
+            console.log('Profile loaded, fetching bills...');
+            await Promise.all([
+              fetchUploads(),
+              fetchAnalyzedBills()
+            ]);
+            console.log('Successfully loaded all dashboard data');
           } else {
             // Redirect to profile setup if no profile exists
+            console.log('No profile found, redirecting to setup');
             router.push('/profile-setup');
           }
         } catch (error) {
-          console.error('Error fetching profile:', error);
+          console.error('Error loading dashboard data:', error);
         }
       } else {
         router.push('/signin');
@@ -68,19 +162,39 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Listen for route changes to refresh data when returning to dashboard
-    const handleRouteChange = (url) => {
+    const handleRouteChange = async (url) => {
+      console.log('Route changed to:', url);
       if (url === '/dashboard' && user) {
         console.log('Returned to dashboard, refreshing data...');
-        fetchAnalyzedBills();
+        try {
+          await Promise.all([
+            fetchUploads(),
+            fetchAnalyzedBills()
+          ]);
+          console.log('Successfully refreshed dashboard data');
+        } catch (error) {
+          console.error('Error refreshing dashboard data:', error);
+        }
       }
     };
 
     router.events.on('routeChangeComplete', handleRouteChange);
 
+    // Initial fetch when component mounts
+    if (user) {
+      console.log('Initial dashboard data fetch');
+      Promise.all([
+        fetchUploads(),
+        fetchAnalyzedBills()
+      ]).catch(error => {
+        console.error('Error in initial data fetch:', error);
+      });
+    }
+
     return () => {
       router.events.off('routeChangeComplete', handleRouteChange);
     };
-  }, [user]);
+  }, [router, user, fetchUploads, fetchAnalyzedBills]);
 
   const UserAvatar = ({ email }) => (
     <div style={{
@@ -273,16 +387,12 @@ export default function Dashboard() {
       console.log('Updated user profile');
 
       // Update UI
-      const newUpload = {
-        id: billDocRef.id,
-        fileName,
-        uploadedAt: new Date().toLocaleString(),
-        fileUrl: downloadURL,
-        storagePath: storageRef.fullPath
-      };
-
-      setRecentUploads(prev => [newUpload, ...prev].slice(0, 5));
-      console.log('Updated recent uploads');
+      console.log('Refreshing bills list...');
+      await Promise.all([
+        fetchUploads(),
+        fetchAnalyzedBills()
+      ]);
+      console.log('Successfully refreshed bills list');
       
       // Reset states
       setSelectedFile(null);
@@ -381,137 +491,27 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => {
-    const fetchUploads = async () => {
-      if (!user) return;
-
-      try {
-        const q = query(
-          collection(db, 'bills'),
-          where('userId', '==', user.uid),
-          orderBy('timestamp', 'desc'),
-          limit(5)
-        );
-
-        const querySnapshot = await getDocs(q);
-        const uploads = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          console.log('Raw bill data:', data); // Log raw data
-          return {
-            id: doc.id,
-            fileName: data.fileName,
-            uploadedAt: data.uploadedAt?.toDate().toLocaleString() || new Date().toLocaleString(),
-            fileUrl: data.fileUrl,
-            storagePath: data.storagePath || `bills/${user.uid}/${data.timestamp}_${data.fileName}` // Fallback if storagePath is missing
-          };
-        });
-
-        console.log('Processed uploads:', uploads); // Log processed data
-        setRecentUploads(uploads);
-      } catch (error) {
-        console.error('Error fetching uploads:', error);
-      }
-    };
-
-    fetchUploads();
-  }, [user]);
-
-  const fetchAnalyzedBills = async () => {
-    if (!user) return;
-
-    console.log('Fetching analyzed bills for user:', user.uid);
-    try {
-      // Simpler query that doesn't require a composite index
-      const q = query(
-        collection(db, 'bills'),
-        where('userId', '==', user.uid)
-      );
-
-      const querySnapshot = await getDocs(q);
-      console.log('Found bills:', querySnapshot.size);
-      
-      const bills = querySnapshot.docs
-        .map(doc => {
-          const data = doc.data();
-          console.log('Processing bill:', doc.id, data);
-          
-          // Only include bills that have been analyzed
-          if (!data.analyzedAt) return null;
-
-          // Convert timestamps to dates if needed
-          let analyzedAt = data.analyzedAt;
-          if (data.analyzedAt && typeof data.analyzedAt.toDate === 'function') {
-            analyzedAt = data.analyzedAt.toDate().toISOString();
-          }
-
-          return {
-            id: doc.id,
-            fileName: data.fileName,
-            analyzedAt: analyzedAt,
-            isMedicalBill: data.isMedicalBill,
-            confidence: data.confidence,
-            totalAmount: data.extractedData?.billInfo?.totalAmount || 'N/A',
-            serviceDates: data.extractedData?.billInfo?.serviceDates || 'N/A'
-          };
-        })
-        .filter(bill => bill !== null)
-        .sort((a, b) => {
-          // Sort by analyzedAt date in descending order
-          const dateA = new Date(a.analyzedAt);
-          const dateB = new Date(b.analyzedAt);
-          return dateB - dateA;
-        });
-
-      console.log('Setting analyzed bills:', bills);
-      setAnalyzedBills(bills);
-    } catch (error) {
-      console.error('Error fetching analyzed bills:', error);
-    }
-  };
-
-  // Add useEffect to listen for route changes
-  useEffect(() => {
-    const handleRouteChange = (url) => {
-      if (url === '/dashboard') {
-        console.log('Back to dashboard, refreshing analyzed bills...');
-        fetchAnalyzedBills();
-      }
-    };
-
-    router.events.on('routeChangeComplete', handleRouteChange);
-    
-    // Initial fetch
-    if (user) {
-      fetchAnalyzedBills();
-    }
-
-    return () => {
-      router.events.off('routeChangeComplete', handleRouteChange);
-    };
-  }, [user]);
-
-  const testFirestore = async () => {
-    try {
-      const testDoc = doc(db, 'test', 'test');
-      await setDoc(testDoc, { test: true });
-      console.log('Firestore connection successful');
-    } catch (error) {
-      console.error('Firestore connection failed:', error);
-    }
-  };
-
   const handleAnalyze = async () => {
     if (!selectedBill) {
       alert('Please select a bill to analyze');
       return;
     }
     
+    setIsAnalyzing(true);
     try {
+      // Store the current bill ID before navigation
+      const billToAnalyze = selectedBill;
+      
+      // Reset states before navigation
+      setSelectedBill('');
+      setIsAnalyzing(false);
+      
       // Navigate to the analysis page for the selected bill
-      router.push(`/analysis/${selectedBill}`);
+      await router.push(`/analysis/${billToAnalyze}`);
     } catch (error) {
       console.error('Error starting analysis:', error);
       alert('Error starting analysis. Please try again.');
+      setIsAnalyzing(false);
     }
   };
 
@@ -546,6 +546,49 @@ export default function Dashboard() {
       setNewFileName(currentName);
     }
   };
+
+  // Add loading screen component
+  if (isAnalyzing) {
+    return (
+      <div style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        background: theme.colors.bgPrimary,
+        color: theme.colors.textPrimary,
+        gap: "2rem"
+      }}>
+        {/* Animated Brain Icon */}
+        <div style={{
+          fontSize: "4rem",
+          animation: "pulse 2s infinite"
+        }}>
+          🧠
+        </div>
+
+        {/* Progress Text */}
+        <div style={{
+          fontSize: "1.5rem",
+          fontWeight: "600",
+          textAlign: "center",
+          maxWidth: "600px",
+          lineHeight: "1.5"
+        }}>
+          Analyzing your medical bill...
+        </div>
+
+        <style jsx>{`
+          @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -1030,8 +1073,7 @@ export default function Dashboard() {
               marginBottom: isMobile ? "1rem" : "1.5rem",
               background: theme.colors.gradientSecondary,
               WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              textAlign: "center"
+              WebkitTextFillColor: "transparent"
             }}>AI Analysis 🤖</h2>
 
             <div style={{

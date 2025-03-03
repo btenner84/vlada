@@ -311,28 +311,25 @@ function convertToProxyUrl(fileUrl) {
         if (pathParts.length >= 2 && pathParts[0] === 'bills') {
           const userId = pathParts[1];
           
-          // Try to extract billId from the URL search params first
+          // Try to extract billId from the URL search params
           const urlParams = new URLSearchParams(url.search);
-          const billIdParam = urlParams.get('billId');
+          const billId = urlParams.get('billId');
           
-          if (billIdParam) {
-            console.log('Extracted billId from URL params:', billIdParam);
-            
-            // Construct the proxy URL with userId and billId
-            const origin = window.location.origin;
-            const proxyUrl = `${origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billIdParam)}`;
+          if (billId) {
+            console.log('Using billId from URL params:', billId);
+            const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billId)}`;
             console.log('Generated proxy URL with auth:', proxyUrl);
             return proxyUrl;
           }
           
-          // If no billId in params, try to extract it from the filename
-          const filename = pathParts[pathParts.length - 1];
-          const billId = filename.split('_')[0]; // Assuming billId is the first part before underscore
+          // If no billId in URL params, try to get it from the current URL
+          const currentUrl = new URL(window.location.href);
+          const currentBillId = currentUrl.pathname.split('/').pop();
           
-          if (billId) {
-            console.log('Extracted billId from filename:', billId);
-            const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billId)}`;
-            console.log('Generated proxy URL with auth from filename:', proxyUrl);
+          if (currentBillId) {
+            console.log('Using billId from current URL:', currentBillId);
+            const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(currentBillId)}`;
+            console.log('Generated proxy URL with auth:', proxyUrl);
             return proxyUrl;
           }
         }

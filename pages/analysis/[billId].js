@@ -248,7 +248,6 @@ export default function BillAnalysis() {
     console.log('Starting analysis with data:', billData);
     
     try {
-      setIsLoading(true);
       setProcessingMethod('');
       
       // Create a new analysis version ID
@@ -326,6 +325,15 @@ export default function BillAnalysis() {
           version: versionNumber
         });
         
+        // Also update the main bill document
+        await updateDoc(doc(db, 'bills', billData.id), {
+          analyzedAt: serverTimestamp(),
+          extractedData: data.extractedData || {},
+          isMedicalBill: data.isMedicalBill,
+          confidence: data.confidence,
+          status: 'analyzed'
+        });
+        
         // Update the state with the new version
         setAnalysisVersion({
           id: versionId,
@@ -334,7 +342,16 @@ export default function BillAnalysis() {
         });
         
         console.log('Document updated in Firestore with server-processed data');
-        setIsLoading(false);
+        setProcessingMethod('server');
+        setRawData({
+          extractedText: data.extractedText,
+          timestamp: new Date().toISOString()
+        });
+        setExtractedData({
+          ...data.extractedData,
+          extractedText: data.extractedText
+        });
+        setOcrProgress(null);
         return;
         
       } catch (serverError) {
@@ -374,6 +391,15 @@ export default function BillAnalysis() {
               processingMethod: 'client',
               userId: currentUser.uid,
               version: versionNumber
+            });
+            
+            // Also update the main bill document
+            await updateDoc(doc(db, 'bills', billData.id), {
+              analyzedAt: serverTimestamp(),
+              extractedData: result,
+              isMedicalBill: result.isMedicalBill,
+              confidence: result.confidence,
+              status: 'analyzed'
             });
             
             // Update the state with the new version
@@ -445,6 +471,15 @@ export default function BillAnalysis() {
             version: versionNumber
           });
           
+          // Also update the main bill document
+          await updateDoc(doc(db, 'bills', billData.id), {
+            analyzedAt: serverTimestamp(),
+            extractedData: dummyData,
+            isMedicalBill: false,
+            confidence: 0,
+            status: 'analyzed'
+          });
+          
           // Update the state with the new version
           setAnalysisVersion({
             id: versionId,
@@ -469,7 +504,6 @@ export default function BillAnalysis() {
         });
       }
     } finally {
-      setIsLoading(false);
       setOcrProgress(null);
     }
   };
@@ -498,11 +532,81 @@ export default function BillAnalysis() {
     }
   };
 
-  // Update the loading state check
-  if (isLoading || ocrProgress) {
-    return <LoadingScreen progress={ocrProgress} />;
+  // Update the loading state check to only show the loading screen until analysis is complete
+  if (isLoading || ocrProgress || !extractedData) {
+    return (
+      <div style={{
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        background: theme.colors.bgPrimary,
+        color: theme.colors.textPrimary,
+        gap: "2rem"
+      }}>
+        {/* Animated Brain Icon */}
+        <div style={{
+          fontSize: "4rem",
+          animation: "pulse 2s infinite"
+        }}>
+          🧠
+        </div>
+
+        {/* Progress Text */}
+        <div style={{
+          fontSize: "1.5rem",
+          fontWeight: "600",
+          textAlign: "center",
+          maxWidth: "600px",
+          lineHeight: "1.5"
+        }}>
+          {ocrProgress?.status === 'loading_model' && "Loading OCR model..."}
+          {ocrProgress?.status === 'recognizing' && (
+            <>
+              Analyzing your document
+              <div style={{
+                fontSize: "1rem",
+                color: theme.colors.textSecondary,
+                marginTop: "0.5rem"
+              }}>
+                {Math.round(ocrProgress.progress * 100)}% complete
+              </div>
+            </>
+          )}
+          {!ocrProgress?.status && "Analyzing your medical bill..."}
+        </div>
+
+        {/* Progress Bar */}
+        {ocrProgress?.progress && (
+          <div style={{
+            width: "300px",
+            height: "4px",
+            background: "rgba(255, 255, 255, 0.1)",
+            borderRadius: "2px",
+            overflow: "hidden"
+          }}>
+            <div style={{
+              width: `${Math.round(ocrProgress.progress * 100)}%`,
+              height: "100%",
+              background: theme.colors.gradientPrimary,
+              transition: "width 0.3s ease"
+            }} />
+          </div>
+        )}
+
+        <style jsx>{`
+          @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+          }
+        `}</style>
+      </div>
+    );
   }
 
+  // Show the simple loading spinner only during initial page load
   if (isLoading) {
     return (
       <div style={{
@@ -1130,8 +1234,9 @@ export default function BillAnalysis() {
       }}>
         <button
           onClick={() => {
-            if (rawData?.extractedText) {
-              alert(rawData.extractedText);
+            const textToShow = extractedData?.extractedText || rawData?.extractedText;
+            if (textToShow) {
+              alert(`Extracted Text (${processingMethod} processing):\n\n${textToShow}`);
             } else {
               let errorMessage = "OCR text extraction failed.\n\nPossible reasons:\n";
               if (error) {

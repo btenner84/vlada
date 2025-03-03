@@ -79,17 +79,28 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     console.log(`Text extracted, length: ${extractedText.length} characters`);
     console.log(`First 100 chars: ${extractedText.substring(0, 100)}`);
     
-    // Process the extracted text with LLM
-    console.log('Processing text with LLM...');
-    const extractedData = await processWithLLM(extractedText);
-    console.log('LLM processing complete');
+    // First verify if it's a medical bill
+    console.log('Verifying if document is a medical bill...');
+    const verificationResult = await processWithLLM(extractedText, true);
+    console.log('Verification result:', verificationResult);
+
+    let extractedData = null;
+    if (verificationResult.isMedicalBill) {
+      // Then extract data if it is a medical bill
+      console.log('Document is a medical bill, extracting data...');
+      extractedData = await processWithLLM(extractedText, false);
+      console.log('Data extraction complete');
+    }
     
     // Return the results
     return {
       success: true,
       extractedText,
       extractedData,
-      fileType
+      fileType,
+      isMedicalBill: verificationResult.isMedicalBill,
+      confidence: verificationResult.confidence,
+      reason: verificationResult.reason
     };
   } catch (error) {
     console.error('Error analyzing document:', error);
