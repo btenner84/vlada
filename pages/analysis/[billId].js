@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { getFirestore } from 'firebase/firestore';
+import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
 
 export default function BillAnalysis() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function BillAnalysis() {
   });
   const [isMedicalBill, setIsMedicalBill] = useState(null);
   const [error, setError] = useState(null);
+  const [processingMethod, setProcessingMethod] = useState(null); // server, client, or fallback
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -89,6 +91,7 @@ export default function BillAnalysis() {
         setExtractedData(data.extractedData);
         setIsMedicalBill(data.isMedicalBill);
         setAnalysisStatus('complete');
+        setProcessingMethod(data.processingMethod || 'server');
         if (data.extractedText) {
           setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
         }
@@ -140,7 +143,7 @@ export default function BillAnalysis() {
       // Try to use the API first
       try {
         // Always use a relative URL for API calls
-        const apiUrl = `${window.location.origin}/api/analyze-simple`;
+        const apiUrl = `${window.location.origin}/api/analyze-full`;
         console.log(`Calling API at ${apiUrl}`);
         console.log('Current hostname:', window.location.hostname);
         console.log('Current origin:', window.location.origin);
@@ -224,84 +227,116 @@ export default function BillAnalysis() {
           // Use the parsed data if available, otherwise use the original response.json()
           const result = data || await response.json();
           
-          // Since we're using the simple endpoint, we need to set dummy data
+          // Update state with the extracted data
+          setExtractedData(result.extractedData);
+          setIsMedicalBill(result.isMedicalBill);
+          setRawData(prev => ({ ...prev, extractedText: result.extractedText || '' }));
+          setProcessingMethod('server');
+          
+          // Update the document in Firestore
+          const docRef = doc(db, 'bills', billData.id);
+          await updateDoc(docRef, {
+            extractedText: result.extractedText || '',
+            extractedData: result.extractedData,
+            isMedicalBill: result.isMedicalBill,
+            confidence: result.confidence,
+            reason: result.reason,
+            analyzedAt: new Date().toISOString(),
+            status: 'analyzed',
+            processingMethod: 'server'
+          });
+          
+          console.log('Document updated in Firestore with server-processed data');
+          
+        } catch (apiError) {
+          console.error('API request failed:', apiError);
+          throw apiError;
+        }
+      } catch (serverError) {
+        console.error('Server-side processing failed, trying client-side processing:', serverError);
+        
+        try {
+          // Try client-side processing
+          console.log('Starting client-side document processing');
+          const clientResult = await analyzeDocumentClient(billData.fileUrl);
+          console.log('Client-side processing result:', clientResult);
+          
+          if (clientResult && clientResult.extractedText) {
+            setRawData(prev => ({ ...prev, extractedText: clientResult.extractedText }));
+            setExtractedData(clientResult.extractedData);
+            setIsMedicalBill(clientResult.isMedicalBill);
+            setProcessingMethod('client');
+            
+            // Update the document in Firestore
+            const docRef = doc(db, 'bills', billData.id);
+            await updateDoc(docRef, {
+              extractedText: clientResult.extractedText,
+              extractedData: clientResult.extractedData,
+              isMedicalBill: clientResult.isMedicalBill,
+              confidence: clientResult.confidence,
+              reason: clientResult.reason,
+              analyzedAt: new Date().toISOString(),
+              status: 'analyzed',
+              processingMethod: 'client',
+              serverError: serverError.message
+            });
+            
+            console.log('Document updated in Firestore with client-processed data');
+          } else {
+            throw new Error('Client-side processing failed to extract text');
+          }
+        } catch (clientError) {
+          console.error('Client-side processing also failed, using fallback data:', clientError);
+          
+          // Fallback to dummy data
           const dummyData = {
-            isMedicalBill: true,
-            confidence: 0.95,
-            reason: "This is a client-side processed response",
-            patientName: "John Doe",
-            providerName: "Example Hospital",
-            totalAmount: "$1,234.56",
-            serviceDate: "2025-01-01",
-            dueDate: "2025-02-01",
-            insuranceCoverage: "$1,000.00",
-            patientResponsibility: "$234.56"
+            patientInfo: {
+              fullName: "John Doe",
+              dateOfBirth: "Not found",
+              accountNumber: "Not found",
+              insuranceInfo: "Not found"
+            },
+            billInfo: {
+              totalAmount: "$1,234.56",
+              serviceDates: "2025-01-01",
+              dueDate: "2025-02-01",
+              facilityName: "Example Hospital"
+            },
+            services: [
+              {
+                description: "Medical service",
+                code: "Not found",
+                amount: "$1,234.56",
+                details: "Not found"
+              }
+            ],
+            insuranceInfo: {
+              amountCovered: "Not found",
+              patientResponsibility: "$1,234.56",
+              adjustments: "Not found"
+            }
           };
           
           setExtractedData(dummyData);
           setIsMedicalBill(true);
+          setProcessingMethod('fallback');
           
           // Update the document in Firestore
           const docRef = doc(db, 'bills', billData.id);
           await updateDoc(docRef, {
             extractedData: dummyData,
             isMedicalBill: true,
-            confidence: 0.95,
-            reason: "This is a client-side processed response",
+            confidence: 'low',
+            reason: "Fallback data - both server-side and client-side processing failed",
             analyzedAt: new Date().toISOString(),
-            status: 'analyzed'
+            status: 'analyzed',
+            processingMethod: 'fallback',
+            serverError: serverError.message,
+            clientError: clientError.message
           });
           
-          console.log('Document updated in Firestore');
-          
-        } catch (apiError) {
-          console.error('API request failed:', apiError);
-          throw apiError;
+          console.log('Document updated in Firestore with fallback data');
         }
-      } catch (error) {
-        console.error('Server-side processing failed, falling back to client-side:', error);
-        
-        // Fallback to client-side processing
-        const dummyData = {
-          isMedicalBill: true,
-          confidence: 0.95,
-          reason: "This is a fallback client-side processed response",
-          patientName: "John Doe",
-          providerName: "Example Hospital",
-          totalAmount: "$1,234.56",
-          serviceDate: "2025-01-01",
-          dueDate: "2025-02-01",
-          insuranceCoverage: "$1,000.00",
-          patientResponsibility: "$234.56"
-        };
-        
-        setExtractedData(dummyData);
-        setIsMedicalBill(true);
-        
-        // Update the document in Firestore
-        const docRef = doc(db, 'bills', billData.id);
-        await updateDoc(docRef, {
-          extractedData: dummyData,
-          isMedicalBill: true,
-          confidence: 0.95,
-          reason: "This is a fallback client-side processed response",
-          analyzedAt: new Date().toISOString(),
-          status: 'analyzed',
-          error: error.message
-        });
-        
-        console.log('Document updated in Firestore with fallback data');
-      }
-
-      // Get the raw extracted text from Firestore
-      const docRef = doc(db, 'bills', billData.id);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const extractedText = data.extractedText || '';
-        console.log('Extracted text:', extractedText);
-        setRawData(prev => ({ ...prev, extractedText }));
       }
 
       setAnalysisStatus('complete');
@@ -367,6 +402,21 @@ export default function BillAnalysis() {
             fontWeight: "bold"
           }}>← Back to Dashboard</span>
         </Link>
+        
+        {processingMethod && (
+          <div style={{
+            padding: "0.5rem 1rem",
+            background: processingMethod === 'server' ? "#10B981" : 
+                       processingMethod === 'client' ? "#F59E0B" : "#6B7280",
+            color: "white",
+            borderRadius: "0.5rem",
+            fontSize: "0.875rem",
+            fontWeight: "500"
+          }}>
+            {processingMethod === 'server' ? "Server Processed" : 
+             processingMethod === 'client' ? "Client Processed" : "Fallback Data"}
+          </div>
+        )}
       </nav>
 
       {/* Main Content */}
@@ -517,6 +567,59 @@ export default function BillAnalysis() {
                     </div>
                   </div>
 
+                  {/* Patient Info */}
+                  <div style={{
+                    background: "#0F172A",
+                    padding: "1.5rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid #334155"
+                  }}>
+                    <h3 style={{
+                      fontSize: "1.1rem",
+                      fontWeight: "600",
+                      marginBottom: "1rem",
+                      color: "#E2E8F0"
+                    }}>Patient Information</h3>
+                    <div style={{ display: "grid", gap: "0.75rem" }}>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 2fr",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#94A3B8" }}>Name</div>
+                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.fullName || '-'}</div>
+                      </div>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 2fr",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#94A3B8" }}>DOB</div>
+                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.dateOfBirth || '-'}</div>
+                      </div>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 2fr",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#94A3B8" }}>Account</div>
+                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.accountNumber || '-'}</div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Services Summary */}
                   <div style={{
                     background: "#0F172A",
@@ -545,6 +648,59 @@ export default function BillAnalysis() {
                           <div style={{ color: "#94A3B8" }}>{service.amount || '-'}</div>
                         </div>
                       )) || <p style={{ color: "#94A3B8" }}>No services found</p>}
+                    </div>
+                  </div>
+
+                  {/* Insurance Info */}
+                  <div style={{
+                    background: "#0F172A",
+                    padding: "1.5rem",
+                    borderRadius: "0.75rem",
+                    border: "1px solid #334155"
+                  }}>
+                    <h3 style={{
+                      fontSize: "1.1rem",
+                      fontWeight: "600",
+                      marginBottom: "1rem",
+                      color: "#E2E8F0"
+                    }}>Insurance Information</h3>
+                    <div style={{ display: "grid", gap: "0.75rem" }}>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#E2E8F0" }}>Insurance Coverage</div>
+                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.amountCovered || '-'}</div>
+                      </div>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#E2E8F0" }}>Patient Responsibility</div>
+                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.patientResponsibility || '-'}</div>
+                      </div>
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: "1rem",
+                        padding: "0.75rem",
+                        background: "#1E293B",
+                        borderRadius: "0.5rem",
+                        border: "1px solid #334155"
+                      }}>
+                        <div style={{ color: "#E2E8F0" }}>Adjustments</div>
+                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.adjustments || '-'}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
