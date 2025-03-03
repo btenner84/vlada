@@ -625,20 +625,20 @@ export default function Dashboard() {
       <main style={{
         maxWidth: "1400px",
         margin: "0 auto",
-        padding: isMobile ? "5rem 1rem 1rem" : "7rem 2rem 2rem",
+        padding: isMobile ? "4.5rem 0.75rem 1rem" : "7rem 2rem 2rem",
       }}>
         {/* Process Steps */}
         <div style={{
           background: theme.colors.bgSecondary,
           borderRadius: theme.borderRadius.lg,
-          padding: "2rem",
-          marginBottom: "2rem",
+          padding: isMobile ? "1.5rem" : "2rem",
+          marginBottom: isMobile ? "1.5rem" : "2rem",
           border: "1px solid rgba(255, 255, 255, 0.1)"
         }}>
           <h2 style={{
-            fontSize: "1.8rem",
+            fontSize: isMobile ? "1.5rem" : "1.8rem",
             fontWeight: "700",
-            marginBottom: "2rem",
+            marginBottom: isMobile ? "1.5rem" : "2rem",
             background: theme.colors.gradientPrimary,
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent"
@@ -647,7 +647,7 @@ export default function Dashboard() {
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
-            gap: "2rem"
+            gap: isMobile ? "1.5rem" : "2rem"
           }}>
             <ProcessStep 
               number="1"
@@ -671,22 +671,22 @@ export default function Dashboard() {
         <div style={{
           display: "grid",
           gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
-          gap: "2rem"
+          gap: isMobile ? "1.25rem" : "2rem"
         }}>
           {/* Left Panel - Bill Upload */}
           <div style={{
             background: theme.colors.bgSecondary,
             borderRadius: theme.borderRadius.lg,
-            padding: "2rem",
+            padding: isMobile ? "1.5rem" : "2rem",
             border: "1px solid rgba(255, 255, 255, 0.1)",
             height: "100%",
-            position: "sticky",
-            top: "100px"
+            position: isMobile ? "relative" : "sticky",
+            top: isMobile ? "0" : "100px"
           }}>
             <h2 style={{
-              fontSize: "1.5rem",
+              fontSize: isMobile ? "1.3rem" : "1.5rem",
               fontWeight: "700",
-              marginBottom: "1.5rem",
+              marginBottom: isMobile ? "1rem" : "1.5rem",
               background: theme.colors.gradientSecondary,
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent"
@@ -811,38 +811,40 @@ export default function Dashboard() {
 
             {/* Recent Uploads */}
             <div style={{
-              padding: "1.5rem",
-              background: "rgba(255, 255, 255, 0.05)",
-              borderRadius: theme.borderRadius.md
+              marginTop: "2rem",
+              borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+              paddingTop: "1.5rem"
             }}>
               <h3 style={{
-                fontSize: "1rem",
+                fontSize: isMobile ? "1rem" : "1.1rem",
                 fontWeight: "600",
-                marginBottom: "1rem",
+                marginBottom: isMobile ? "0.75rem" : "1rem",
                 color: theme.colors.textPrimary
               }}>Recent Uploads</h3>
-              
+
               {recentUploads.length > 0 ? (
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.75rem"
-                }}>
+                <div style={{ display: "grid", gap: isMobile ? "0.75rem" : "1rem" }}>
                   {recentUploads.map((upload, index) => (
-                    <div key={index} style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      background: "rgba(255, 255, 255, 0.05)",
-                      borderRadius: theme.borderRadius.md,
-                      padding: "1rem",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
-                      marginBottom: "0.75rem"
-                    }}>
+                    <div
+                      key={index}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.05)",
+                        borderRadius: theme.borderRadius.md,
+                        padding: isMobile ? "0.75rem" : "1rem",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        display: "flex",
+                        flexDirection: isMobile ? "column" : "row",
+                        justifyContent: "space-between",
+                        alignItems: isMobile ? "flex-start" : "center",
+                        gap: isMobile ? "0.75rem" : "0"
+                      }}
+                    >
                       <div style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "0.25rem"
+                        gap: "0.25rem",
+                        flex: 1,
+                        minWidth: 0 // Enable text truncation
                       }}>
                         {editingFileName === upload.id ? (
                           <input
@@ -907,7 +909,10 @@ export default function Dashboard() {
                       <div style={{
                         display: "flex",
                         gap: "0.5rem",
-                        alignItems: "center"
+                        alignItems: "center",
+                        flexShrink: 0, // Prevent button from shrinking
+                        width: isMobile ? "100%" : "auto",
+                        justifyContent: isMobile ? "space-between" : "flex-end"
                       }}>
                         <a
                           href={upload.fileUrl}
@@ -924,10 +929,11 @@ export default function Dashboard() {
                             alignItems: "center",
                             justifyContent: "center",
                             transition: "all 0.2s ease",
-                            width: "32px",
-                            height: "32px",
+                            width: isMobile ? "40px" : "32px",
+                            height: isMobile ? "40px" : "32px",
                             backdropFilter: "blur(8px)",
-                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
+                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+                            flex: isMobile ? "1" : "0"
                           }}
                           onMouseEnter={(e) => {
                             e.target.style.background = "rgba(31, 41, 55, 0.8)";
@@ -961,10 +967,11 @@ export default function Dashboard() {
                             justifyContent: "center",
                             borderRadius: theme.borderRadius.md,
                             transition: "all 0.2s ease",
-                            width: "32px",
-                            height: "32px",
+                            width: isMobile ? "40px" : "32px",
+                            height: isMobile ? "40px" : "32px",
                             backdropFilter: "blur(8px)",
-                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
+                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+                            flex: isMobile ? "1" : "0"
                           }}
                           onMouseEnter={(e) => {
                             e.target.style.background = "rgba(31, 41, 55, 0.8)";
@@ -1010,23 +1017,25 @@ export default function Dashboard() {
           <div style={{
             background: theme.colors.bgSecondary,
             borderRadius: theme.borderRadius.lg,
-            padding: "2rem",
+            padding: isMobile ? "1.5rem" : "2rem",
             border: "1px solid rgba(255, 255, 255, 0.1)",
             height: "100%",
-            position: "sticky",
-            top: "100px"
+            position: isMobile ? "relative" : "sticky",
+            top: isMobile ? "0" : "100px",
+            marginTop: isMobile ? "1rem" : "0"
           }}>
             <h2 style={{
-              fontSize: "1.5rem",
+              fontSize: isMobile ? "1.3rem" : "1.5rem",
               fontWeight: "700",
-              marginBottom: "1.5rem",
+              marginBottom: isMobile ? "1rem" : "1.5rem",
               background: theme.colors.gradientSecondary,
               WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent"
+              WebkitTextFillColor: "transparent",
+              textAlign: "center"
             }}>AI Analysis 🤖</h2>
 
             <div style={{
-              marginBottom: "2rem"
+              marginBottom: isMobile ? "1.5rem" : "2rem"
             }}>
               <select
                 value={selectedBill}
@@ -1054,12 +1063,12 @@ export default function Dashboard() {
                 disabled={!selectedBill}
                 style={{
                   width: "100%",
-                  padding: "1rem",
+                  padding: isMobile ? "0.875rem" : "1rem",
                   background: theme.colors.gradientPrimary,
                   border: "none",
                   borderRadius: theme.borderRadius.md,
                   color: theme.colors.textPrimary,
-                  fontSize: "1rem",
+                  fontSize: isMobile ? "0.95rem" : "1rem",
                   fontWeight: "600",
                   cursor: selectedBill ? "pointer" : "not-allowed",
                   opacity: selectedBill ? 1 : 0.7,
@@ -1067,7 +1076,7 @@ export default function Dashboard() {
                   alignItems: "center",
                   justifyContent: "center",
                   gap: "0.5rem",
-                  marginBottom: "2rem"
+                  marginBottom: isMobile ? "1.5rem" : "2rem"
                 }}
               >
                 Analyze Bill ⚡
@@ -1075,127 +1084,184 @@ export default function Dashboard() {
 
               {/* Analyzed Bills List */}
               <div style={{
-                marginTop: "2rem",
+                marginTop: isMobile ? "1.5rem" : "2rem",
                 borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-                paddingTop: "1.5rem"
+                paddingTop: isMobile ? "1.25rem" : "1.5rem"
               }}>
                 <h3 style={{
-                  fontSize: "1.1rem",
-                  fontWeight: "600",
-                  marginBottom: "1rem",
-                  color: theme.colors.textPrimary
-                }}>Analyzed Bills</h3>
+                  fontSize: isMobile ? "1rem" : "1.1rem",
+                  fontWeight: "700",
+                  marginBottom: isMobile ? "1rem" : "1.5rem",
+                  color: theme.colors.textPrimary,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem"
+                }}>
+                  <span style={{ 
+                    background: theme.colors.gradientPrimary,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent"
+                  }}>Analyzed Bills</span>
+                  {analyzedBills.length > 0 && (
+                    <span style={{
+                      fontSize: "0.75rem",
+                      background: "rgba(255, 255, 255, 0.1)",
+                      borderRadius: "999px",
+                      padding: "0.2rem 0.5rem",
+                      color: theme.colors.textSecondary
+                    }}>{analyzedBills.length}</span>
+                  )}
+                </h3>
 
                 {analyzedBills.length > 0 ? (
-                  <div style={{ display: "grid", gap: "1rem" }}>
+                  <div style={{ display: "grid", gap: isMobile ? "0.85rem" : "1.25rem" }}>
                     {analyzedBills.map((bill, index) => (
                       <div
                         key={index}
                         style={{
-                          background: "rgba(255, 255, 255, 0.05)",
-                          borderRadius: theme.borderRadius.md,
-                          padding: "1rem",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center"
+                          background: "rgba(30, 41, 59, 0.5)",
+                          borderRadius: theme.borderRadius.lg,
+                          overflow: "hidden",
+                          border: "1px solid rgba(255, 255, 255, 0.08)",
+                          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                          transition: "all 0.3s ease",
+                          position: "relative"
                         }}
                       >
+                        {/* Subtle gradient overlay */}
                         <div style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: "4px",
+                          background: theme.colors.gradientPrimary,
+                          opacity: 0.8
+                        }} />
+                        
+                        <div style={{
+                          padding: isMobile ? "1rem" : "1.25rem",
                           display: "flex",
-                          flexDirection: "column",
-                          gap: "0.25rem",
-                          flex: 1,
-                          minWidth: 0 // Enable text truncation
+                          flexDirection: isMobile ? "column" : "row",
+                          justifyContent: "space-between",
+                          alignItems: isMobile ? "flex-start" : "center",
+                          gap: isMobile ? "1rem" : "0.5rem"
                         }}>
                           <div style={{
-                            fontSize: "0.95rem",
-                            fontWeight: "500",
-                            color: theme.colors.textPrimary,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis"
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "0.35rem",
+                            flex: 1,
+                            minWidth: 0 // Enable text truncation
                           }}>
-                            {bill.fileName}
-                          </div>
-                          <div style={{
-                            fontSize: "0.8rem",
-                            color: theme.colors.textSecondary
-                          }}>
-                            {new Date(bill.analyzedAt).toLocaleDateString()}
-                          </div>
-                        </div>
-                        <div style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          alignItems: "center",
-                          flexShrink: 0 // Prevent button from shrinking
-                        }}>
-                          <Link
-                            href={`/analysis/${bill.id}`}
-                            style={{
-                              padding: "0.5rem 1rem",
-                              background: theme.colors.primary,
+                            <div style={{
+                              fontSize: "1rem",
+                              fontWeight: "600",
                               color: theme.colors.textPrimary,
-                              borderRadius: theme.borderRadius.md,
-                              textDecoration: "none",
-                              fontSize: "0.875rem",
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis"
+                            }}>
+                              {bill.fileName}
+                            </div>
+                            <div style={{
+                              fontSize: "0.8rem",
+                              color: theme.colors.textSecondary,
                               display: "flex",
                               alignItems: "center",
-                              gap: "0.25rem",
-                              transition: "all 0.2s ease",
-                              border: "none",
-                              width: "120px", // Fixed width
-                              justifyContent: "center" // Center text
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.transform = "scale(1.05)";
-                              e.target.style.opacity = "0.9";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.transform = "scale(1)";
-                              e.target.style.opacity = "1";
-                            }}
-                          >
-                            View Analysis
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
-                            disabled={deletingFile}
-                            style={{
-                              background: "rgba(31, 41, 55, 0.7)",
-                              border: "1px solid rgba(220, 38, 38, 0.3)",
-                              color: "#DC2626",
-                              cursor: deletingFile ? "not-allowed" : "pointer",
-                              opacity: deletingFile ? 0.5 : 1,
-                              padding: "0.5rem",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              borderRadius: theme.borderRadius.md,
-                              transition: "all 0.2s ease",
-                              width: "32px",
-                              height: "32px",
-                              backdropFilter: "blur(8px)",
-                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
-                              e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
-                              e.target.style.transform = "scale(1.05)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
-                              e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
-                              e.target.style.transform = "scale(1)";
-                            }}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M3 6h18"/>
-                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                            </svg>
-                          </button>
+                              gap: "0.35rem"
+                            }}>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <polyline points="12 6 12 12 16 14" />
+                              </svg>
+                              {new Date(bill.analyzedAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                          <div style={{
+                            display: "flex",
+                            gap: "0.75rem",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            width: isMobile ? "100%" : "auto",
+                            justifyContent: isMobile ? "space-between" : "flex-end"
+                          }}>
+                            <Link
+                              href={`/analysis/${bill.id}`}
+                              style={{
+                                padding: isMobile ? "0.7rem 1.1rem" : "0.7rem 1.1rem",
+                                background: "rgba(59, 130, 246, 0.15)",
+                                color: "#60A5FA",
+                                borderRadius: theme.borderRadius.md,
+                                textDecoration: "none",
+                                fontSize: "0.875rem",
+                                fontWeight: "600",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "0.5rem",
+                                transition: "all 0.2s ease",
+                                border: "1px solid rgba(59, 130, 246, 0.3)",
+                                backdropFilter: "blur(8px)",
+                                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+                                whiteSpace: "nowrap",
+                                flex: isMobile ? "1" : "0"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = "rgba(59, 130, 246, 0.25)";
+                                e.target.style.borderColor = "rgba(59, 130, 246, 0.5)";
+                                e.target.style.transform = "translateY(-2px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = "rgba(59, 130, 246, 0.15)";
+                                e.target.style.borderColor = "rgba(59, 130, 246, 0.3)";
+                                e.target.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                              View
+                            </Link>
+                            <button
+                              onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
+                              disabled={deletingFile}
+                              style={{
+                                background: "rgba(220, 38, 38, 0.1)",
+                                border: "1px solid rgba(220, 38, 38, 0.2)",
+                                color: "#F87171",
+                                cursor: deletingFile ? "not-allowed" : "pointer",
+                                opacity: deletingFile ? 0.5 : 1,
+                                padding: "0.7rem",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderRadius: theme.borderRadius.md,
+                                transition: "all 0.2s ease",
+                                width: isMobile ? "40px" : "40px",
+                                height: isMobile ? "40px" : "40px",
+                                backdropFilter: "blur(8px)",
+                                flexShrink: 0
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = "rgba(220, 38, 38, 0.2)";
+                                e.target.style.borderColor = "rgba(220, 38, 38, 0.4)";
+                                e.target.style.transform = "translateY(-2px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = "rgba(220, 38, 38, 0.1)";
+                                e.target.style.borderColor = "rgba(220, 38, 38, 0.2)";
+                                e.target.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18"/>
+                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1203,12 +1269,25 @@ export default function Dashboard() {
                 ) : (
                   <div style={{
                     textAlign: "center",
-                    padding: "2rem",
-                    background: "rgba(255, 255, 255, 0.03)",
-                    borderRadius: theme.borderRadius.md,
-                    color: theme.colors.textSecondary
+                    padding: "2.5rem 1.5rem",
+                    background: "rgba(30, 41, 59, 0.3)",
+                    borderRadius: theme.borderRadius.lg,
+                    color: theme.colors.textSecondary,
+                    border: "1px dashed rgba(255, 255, 255, 0.1)",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "0.75rem"
                   }}>
-                    No analyzed bills yet
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="16" y1="13" x2="8" y2="13" />
+                      <line x1="16" y1="17" x2="8" y2="17" />
+                      <polyline points="10 9 9 9 8 9" />
+                    </svg>
+                    <div>No analyzed bills yet</div>
+                    <div style={{ fontSize: "0.8rem", opacity: 0.7 }}>Upload and analyze a bill to get started</div>
                   </div>
                 )}
               </div>
