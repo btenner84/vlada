@@ -593,6 +593,25 @@ export default function BillAnalysis() {
     setBillAnswer('');
     
     try {
+      // Prepare comprehensive context from bill data
+      const contextData = {
+        extractedData,
+        billInfo: {
+          totalAmount: extractedData?.billInfo?.totalAmount,
+          serviceDates: extractedData?.billInfo?.serviceDates,
+          provider: extractedData?.billInfo?.provider,
+          services: extractedData?.billInfo?.services || [],
+          cptCodes: extractedData?.billInfo?.cptCodes || [],
+          diagnosisCodes: extractedData?.billInfo?.diagnosisCodes || [],
+        },
+        insuranceInfo: {
+          type: extractedData?.insuranceInfo?.type,
+          provider: extractedData?.insuranceInfo?.provider,
+          planType: extractedData?.insuranceInfo?.planType,
+        },
+        rawText: extractedData?.rawText || '',
+      };
+
       const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: {
@@ -600,17 +619,21 @@ export default function BillAnalysis() {
         },
         body: JSON.stringify({ 
           text: billQuestion,
-          context: JSON.stringify(extractedData),
+          context: JSON.stringify(contextData),
           mode: 'qa'
         }),
       });
       
-      if (!response.ok) throw new Error('Failed to get answer');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get answer');
+      }
+      
       const data = await response.json();
       setBillAnswer(data.summary);
     } catch (error) {
       console.error('Failed to get answer:', error);
-      setBillAnswer('Sorry, I had trouble answering that question. Please try again.');
+      setBillAnswer('I apologize, but I encountered an error while processing your question. Please try rephrasing your question or ask something else about the bill.');
     } finally {
       setIsAskingQuestion(false);
     }
