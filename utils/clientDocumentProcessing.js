@@ -53,7 +53,13 @@ export async function extractTextFromImageClient(imageUrl, progressHandler = nul
     });
     
     if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      console.error('Failed to fetch image:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText: errorText
+      });
+      throw new Error(`Failed to fetch image: ${response.status} - ${errorText}`);
     }
     
     const imageBlob = await response.blob();
@@ -286,6 +292,7 @@ export async function detectFileTypeClient(fileUrl) {
 function convertToProxyUrl(fileUrl) {
   try {
     const url = new URL(fileUrl);
+    console.log('Converting URL:', fileUrl);
     
     // Check if it's a Firebase Storage URL
     if (url.hostname.includes('firebasestorage.googleapis.com')) {
@@ -314,7 +321,18 @@ function convertToProxyUrl(fileUrl) {
             // Construct the proxy URL with userId and billId
             const origin = window.location.origin;
             const proxyUrl = `${origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billIdParam)}`;
-            console.log('Generated proxy URL:', proxyUrl);
+            console.log('Generated proxy URL with auth:', proxyUrl);
+            return proxyUrl;
+          }
+          
+          // If no billId in params, try to extract it from the filename
+          const filename = pathParts[pathParts.length - 1];
+          const billId = filename.split('_')[0]; // Assuming billId is the first part before underscore
+          
+          if (billId) {
+            console.log('Extracted billId from filename:', billId);
+            const proxyUrl = `${window.location.origin}/api/proxy-file?path=${encodeURIComponent(decodedPath)}&userId=${encodeURIComponent(userId)}&billId=${encodeURIComponent(billId)}`;
+            console.log('Generated proxy URL with auth from filename:', proxyUrl);
             return proxyUrl;
           }
         }

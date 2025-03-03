@@ -147,15 +147,23 @@ export default async function handler(req, res) {
       const decodedPath = decodeURIComponent(path).replace(/^\/+/, '');
       console.log('Decoded path:', decodedPath);
       
-      const file = bucket.file(decodedPath);
+      // Handle query parameters in the path
+      const cleanPath = decodedPath.split('?')[0];
+      console.log('Clean path:', cleanPath);
+      
+      const file = bucket.file(cleanPath);
       console.log('File reference created:', file.name);
       
       // Check if the file exists
       console.log('Checking if file exists...');
       const [exists] = await file.exists();
       if (!exists) {
-        console.log('File not found:', decodedPath);
-        return res.status(404).json({ error: 'File not found' });
+        console.log('File not found:', cleanPath);
+        return res.status(404).json({ 
+          error: 'File not found',
+          path: cleanPath,
+          bucket: bucket.name
+        });
       }
       console.log('File exists');
       
@@ -165,13 +173,17 @@ export default async function handler(req, res) {
       console.log('File metadata:', {
         contentType: metadata.contentType,
         size: metadata.size,
-        updated: metadata.updated
+        updated: metadata.updated,
+        name: metadata.name,
+        bucket: metadata.bucket
       });
       
       const contentType = metadata.contentType || 'application/octet-stream';
       
-      // Set the content type header
+      // Set response headers
       res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.setHeader('Content-Disposition', 'inline');
       
       // For HEAD requests, just return the headers
       if (req.method === 'HEAD') {
@@ -182,24 +194,49 @@ export default async function handler(req, res) {
       
       // For GET requests, stream the file
       console.log('Streaming file to response');
-      const fileStream = file.createReadStream();
+      const fileStream = file.createReadStream({
+        validation: false // Skip MD5 validation for faster streaming
+      });
       
+      // Handle stream errors
       fileStream.on('error', (error) => {
         console.error('Error streaming file:', error);
+        console.error('Stream error details:', {
+          message: error.message,
+          code: error.code,
+          stack: error.stack
+        });
         // Only send response if headers haven't been sent yet
         if (!res.headersSent) {
-          res.status(500).json({ error: 'Error streaming file' });
+          res.status(500).json({ 
+            error: 'Error streaming file',
+            details: error.message,
+            code: error.code
+          });
         }
       });
       
       fileStream.on('end', () => {
-        console.log('File streaming completed');
+        console.log('File streaming completed successfully');
       });
       
-      fileStream.pipe(res);
+      // Pipe the file stream to the response
+      fileStream.pipe(res).on('error', (error) => {
+        console.error('Error piping stream to response:', error);
+      });
+      
     } catch (storageError) {
       console.error('Firebase Storage error:', storageError);
-      return res.status(500).json({ error: `Firebase Storage error: ${storageError.message}` });
+      console.error('Storage error details:', {
+        message: storageError.message,
+        code: storageError.code,
+        stack: storageError.stack
+      });
+      return res.status(500).json({ 
+        error: 'Firebase Storage error',
+        details: storageError.message,
+        code: storageError.code
+      });
     }
   } catch (error) {
     console.error('Error proxying file:', error);
