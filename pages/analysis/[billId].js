@@ -228,6 +228,7 @@ export default function BillAnalysis() {
           const result = data || await response.json();
           
           // Update state with the extracted data
+          console.log('Setting extracted text from server response:', result.extractedText ? result.extractedText.substring(0, 100) + '...' : 'No text');
           setExtractedData(result.extractedData);
           setIsMedicalBill(result.isMedicalBill);
           setRawData(prev => ({ ...prev, extractedText: result.extractedText || '' }));
@@ -262,6 +263,7 @@ export default function BillAnalysis() {
           console.log('Client-side processing result:', clientResult);
           
           if (clientResult && clientResult.extractedText) {
+            console.log('Setting extracted text from client processing:', clientResult.extractedText.substring(0, 100) + '...');
             setRawData(prev => ({ ...prev, extractedText: clientResult.extractedText }));
             setExtractedData(clientResult.extractedData);
             setIsMedicalBill(clientResult.isMedicalBill);
@@ -317,6 +319,10 @@ export default function BillAnalysis() {
             }
           };
           
+          // Set dummy extracted text for display
+          const dummyText = "This is fallback dummy text since both server-side and client-side processing failed to extract text from the document.";
+          console.log('Setting fallback dummy text');
+          setRawData(prev => ({ ...prev, extractedText: dummyText }));
           setExtractedData(dummyData);
           setIsMedicalBill(true);
           setProcessingMethod('fallback');
@@ -324,6 +330,7 @@ export default function BillAnalysis() {
           // Update the document in Firestore
           const docRef = doc(db, 'bills', billData.id);
           await updateDoc(docRef, {
+            extractedText: dummyText,
             extractedData: dummyData,
             isMedicalBill: true,
             confidence: 'low',
@@ -348,6 +355,21 @@ export default function BillAnalysis() {
       setRawData(prev => ({ ...prev, loading: false }));
     }
   };
+
+  // Add a useEffect to log the rawData state when it changes
+  useEffect(() => {
+    if (rawData.extractedText) {
+      console.log('Raw data text updated, length:', rawData.extractedText.length);
+      console.log('First 200 chars of extracted text:', rawData.extractedText.substring(0, 200));
+    }
+  }, [rawData.extractedText]);
+
+  // Add a useEffect to log the extractedData state when it changes
+  useEffect(() => {
+    if (extractedData) {
+      console.log('Extracted data updated:', extractedData);
+    }
+  }, [extractedData]);
 
   if (isLoading) {
     return (
@@ -763,20 +785,39 @@ export default function BillAnalysis() {
                   fontWeight: "600",
                   color: "#E2E8F0"
                 }}>Extracted Text</h2>
-                <button
-                  onClick={() => navigator.clipboard.writeText(rawData.extractedText)}
-                  style={{
-                    padding: "0.5rem 1rem",
-                    background: "#3B82F6",
-                    color: "#E2E8F0",
-                    border: "none",
-                    borderRadius: "0.5rem",
-                    cursor: "pointer",
-                    fontSize: "0.9rem"
-                  }}
-                >
-                  Copy
-                </button>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button
+                    onClick={() => {
+                      console.log('Current raw text:', rawData.extractedText);
+                      alert(`Text length: ${rawData.extractedText?.length || 0}`);
+                    }}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      background: "#4B5563",
+                      color: "#E2E8F0",
+                      border: "none",
+                      borderRadius: "0.5rem",
+                      cursor: "pointer",
+                      fontSize: "0.9rem"
+                    }}
+                  >
+                    Debug
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(rawData.extractedText)}
+                    style={{
+                      padding: "0.5rem 1rem",
+                      background: "#3B82F6",
+                      color: "#E2E8F0",
+                      border: "none",
+                      borderRadius: "0.5rem",
+                      cursor: "pointer",
+                      fontSize: "0.9rem"
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
               {rawData.loading ? (
                 <div style={{
@@ -802,6 +843,17 @@ export default function BillAnalysis() {
                 }}>
                   {rawData.extractedText || 'No text extracted yet'}
                 </pre>
+              )}
+              {/* Add text length indicator */}
+              {rawData.extractedText && (
+                <div style={{
+                  marginTop: "0.5rem",
+                  color: "#94A3B8",
+                  fontSize: "0.8rem",
+                  textAlign: "right"
+                }}>
+                  Text length: {rawData.extractedText.length} characters
+                </div>
               )}
             </div>
           </div>

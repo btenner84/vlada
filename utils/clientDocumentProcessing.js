@@ -535,6 +535,7 @@ export async function analyzeDocumentClient(fileUrl) {
     }
 
     console.log('Text extracted successfully, length:', extractedText.length);
+    console.log('First 200 chars:', extractedText.substring(0, 200));
 
     // First verify if it's a medical bill
     console.log('Verifying if document is a medical bill...');
@@ -546,18 +547,30 @@ export async function analyzeDocumentClient(fileUrl) {
       // Then extract data if it is a medical bill
       console.log('Document is a medical bill, extracting data...');
       structuredData = await processWithClientLLM(extractedText, false);
-      console.log('Data extraction complete');
+      console.log('Data extraction complete:', structuredData);
     }
 
-    return {
+    // Ensure we're returning the extracted text
+    const result = {
       success: true,
-      extractedText,
+      extractedText: extractedText,
       extractedData: structuredData,
       isMedicalBill: verificationResult.isMedicalBill,
       confidence: verificationResult.confidence,
       reason: verificationResult.reason,
       fileType
     };
+    
+    console.log('Final client-side analysis result:', {
+      success: result.success,
+      textLength: result.extractedText.length,
+      hasExtractedData: !!result.extractedData,
+      isMedicalBill: result.isMedicalBill,
+      confidence: result.confidence,
+      fileType: result.fileType
+    });
+    
+    return result;
 
   } catch (error) {
     console.error('Client-side analysis error:', error);
