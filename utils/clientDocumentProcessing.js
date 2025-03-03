@@ -33,65 +33,40 @@ export async function terminateClientWorker() {
 }
 
 export async function extractTextFromImageClient(imageUrl) {
-  console.log('Starting client-side text extraction process...');
-  let clientWorker = null;
+  console.log('Starting client-side image OCR process...');
   
   try {
-    clientWorker = await getClientWorker();
-    console.log('Got client-side Tesseract worker');
+    // Use our proxy endpoint instead of direct Firebase URL
+    const proxyUrl = convertToProxyUrl(imageUrl);
+    console.log('Using proxy URL for image:', proxyUrl);
+    
+    // Get the Tesseract worker
+    const worker = await getClientWorker();
     
     // Fetch the image
-    console.log('Fetching image from URL:', imageUrl);
-    const response = await fetch(imageUrl);
+    console.log('Fetching image from URL:', proxyUrl);
+    const response = await fetch(proxyUrl);
     if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.status}`);
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     }
     
     const imageBlob = await response.blob();
-    console.log('Image fetched successfully, size:', imageBlob.size);
+    console.log('Image fetched successfully, size:', imageBlob.size, 'bytes');
     
-    // Create an object URL for the image
-    const objectUrl = URL.createObjectURL(imageBlob);
+    // Recognize text in the image
+    console.log('Starting OCR recognition...');
+    const result = await worker.recognize(imageBlob);
+    console.log('OCR recognition completed');
     
-    // Recognize text from the image
-    console.log('Starting client-side OCR recognition...');
+    // Extract the text
+    const extractedText = result.data.text;
+    console.log('Text extracted from image, length:', extractedText.length);
+    console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
     
-    // Set additional parameters for better recognition of medical documents
-    await clientWorker.setParameters({
-      tessedit_ocr_engine_mode: 3, // Legacy + LSTM mode for better accuracy
-      preserve_interword_spaces: '1',
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/" ',
-      tessjs_create_hocr: '1', // Create HOCR output
-      tessjs_create_tsv: '1', // Create TSV output
-      tessjs_create_box: '0',
-      tessjs_create_unlv: '0',
-      tessjs_create_osd: '0'
-    });
-    
-    const { data } = await clientWorker.recognize(objectUrl);
-    const { text, hocr, tsv } = data;
-    console.log('Client-side OCR recognition completed');
-
-    // Clean up the object URL
-    URL.revokeObjectURL(objectUrl);
-
-    if (!text || text.trim().length === 0) {
-      throw new Error('No text was extracted from the image');
-    }
-
-    console.log('Client-side OCR completed, text length:', text.length);
-    console.log('First 200 chars:', text.substring(0, 200));
-    
-    // Extract structured data from HOCR/TSV if needed
-    const structuredData = extractStructuredDataFromOCR(tsv);
-    
-    return {
-      text,
-      structuredData
-    };
+    return extractedText;
   } catch (error) {
-    console.error('Client-side text extraction error:', error);
-    throw new Error(`Client-side text extraction failed: ${error.message}`);
+    console.error('Client-side image OCR error:', error);
+    throw new Error(`Client-side image OCR failed: ${error.message}`);
   }
 }
 
@@ -152,104 +127,50 @@ function extractStructuredDataFromOCR(tsv) {
 }
 
 export async function extractTextFromPDFClient(pdfUrl) {
+  console.log('Starting client-side PDF text extraction...');
+  
   try {
-    console.log('Starting client-side PDF extraction from URL:', pdfUrl);
+    // Use our proxy endpoint instead of direct Firebase URL
+    const proxyUrl = convertToProxyUrl(pdfUrl);
+    console.log('Using proxy URL for PDF:', proxyUrl);
+    
+    // Load the PDF.js library
+    const pdfjsLib = await import('pdfjs-dist');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
     
     // Fetch the PDF
-    const response = await fetch(pdfUrl);
+    console.log('Fetching PDF from URL:', proxyUrl);
+    const response = await fetch(proxyUrl);
     if (!response.ok) {
-      throw new Error(`Failed to fetch PDF: ${response.status}`);
+      throw new Error(`Failed to fetch PDF: ${response.status} ${response.statusText}`);
     }
     
-    const pdfBlob = await response.blob();
-    console.log('PDF fetched successfully, size:', pdfBlob.size);
-    
-    // Load PDF.js dynamically
-    if (!window.pdfjsLib) {
-      console.log('Loading PDF.js library...');
-      // Use CDN version to avoid bundling issues
-      const pdfjsScript = document.createElement('script');
-      pdfjsScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js';
-      document.head.appendChild(pdfjsScript);
-      
-      // Wait for script to load
-      await new Promise((resolve) => {
-        pdfjsScript.onload = resolve;
-      });
-      
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
-        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-    }
-    
-    // Create an object URL for the PDF
-    const objectUrl = URL.createObjectURL(pdfBlob);
+    const pdfData = await response.arrayBuffer();
+    console.log('PDF fetched successfully, size:', pdfData.byteLength, 'bytes');
     
     // Load the PDF document
-    const loadingTask = window.pdfjsLib.getDocument(objectUrl);
+    console.log('Loading PDF document...');
+    const loadingTask = pdfjsLib.getDocument({ data: pdfData });
     const pdf = await loadingTask.promise;
-    console.log('PDF document loaded with', pdf.numPages, 'pages');
+    console.log('PDF document loaded, pages:', pdf.numPages);
     
-    // Extract text from all pages
+    // Extract text from each page
     let fullText = '';
-    let pageTexts = [];
-    
     for (let i = 1; i <= pdf.numPages; i++) {
+      console.log(`Processing page ${i} of ${pdf.numPages}...`);
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      
-      // Process text with position information
       const pageText = processPageText(textContent);
-      pageTexts.push(pageText);
-      fullText += pageText.text + '\n';
-      
-      // For the first page, try to extract as image as well (for PDFs with embedded images)
-      if (i === 1) {
-        try {
-          const scale = 1.5;
-          const viewport = page.getViewport({ scale });
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          
-          await page.render({
-            canvasContext: context,
-            viewport: viewport
-          }).promise;
-          
-          // Try OCR on the rendered page
-          const dataUrl = canvas.toDataURL('image/png');
-          const clientWorker = await getClientWorker();
-          const { data } = await clientWorker.recognize(dataUrl);
-          
-          if (data.text && data.text.length > fullText.length * 0.5) {
-            console.log('OCR extracted more text than PDF.js, using OCR result');
-            fullText = data.text;
-          }
-        } catch (ocrError) {
-          console.error('Error performing OCR on PDF page:', ocrError);
-          // Continue with the text content from PDF.js
-        }
-      }
+      fullText += pageText + '\n\n';
     }
     
-    // Clean up the object URL
-    URL.revokeObjectURL(objectUrl);
+    console.log('Text extracted from PDF, length:', fullText.length);
+    console.log('First 100 chars of extracted text:', fullText.substring(0, 100));
     
-    if (!fullText || fullText.trim().length === 0) {
-      throw new Error('No text content found in PDF');
-    }
-    
-    console.log('PDF text extracted successfully, length:', fullText.length);
-    console.log('First 200 chars:', fullText.substring(0, 200));
-    
-    return {
-      text: fullText,
-      pageTexts
-    };
+    return fullText;
   } catch (error) {
-    console.error('Client-side PDF parsing error:', error);
-    throw new Error(`Client-side PDF extraction failed: ${error.message}`);
+    console.error('Client-side PDF text extraction error:', error);
+    throw new Error(`Client-side PDF text extraction failed: ${error.message}`);
   }
 }
 
@@ -303,61 +224,92 @@ function processPageText(textContent) {
 }
 
 export async function detectFileTypeClient(fileUrl) {
+  console.log('Detecting file type for URL:', fileUrl);
+  
   try {
-    console.log('Detecting file type for URL:', fileUrl);
+    // Use our proxy endpoint instead of direct Firebase URL
+    const proxyUrl = convertToProxyUrl(fileUrl);
+    console.log('Using proxy URL for file type detection:', proxyUrl);
     
-    if (!fileUrl) {
-      throw new Error('No file URL provided');
-    }
+    // Try to determine the file type from the headers
+    console.log('Sending HEAD request to determine file type...');
+    const response = await fetch(proxyUrl, { method: 'HEAD' });
     
-    // Extract file extension from URL
-    const urlParts = fileUrl.split('?')[0]; // Remove query parameters
-    const extension = urlParts.split('.').pop().toLowerCase();
-    
-    // Common file extensions
-    const pdfExtensions = ['pdf'];
-    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'heic', 'heif'];
-    
-    if (pdfExtensions.includes(extension)) {
-      console.log('Detected PDF file type from extension');
-      return 'pdf';
-    } else if (imageExtensions.includes(extension)) {
-      console.log('Detected image file type from extension');
-      return 'image';
-    }
-    
-    // If extension doesn't provide clear type, try HEAD request
-    try {
-      const response = await fetch(fileUrl, { method: 'HEAD' });
-      if (!response.ok) {
-        console.warn(`Failed to fetch file headers: ${response.status}`);
-      } else {
-        const contentType = response.headers.get('content-type');
-        if (contentType) {
-          console.log('Content-Type:', contentType);
-          
-          if (contentType.includes('pdf')) {
-            return 'pdf';
-          } else if (contentType.includes('image')) {
-            return 'image';
-          }
+    if (response.ok) {
+      const contentType = response.headers.get('content-type');
+      console.log('Content-Type from headers:', contentType);
+      
+      if (contentType) {
+        if (contentType.includes('application/pdf')) {
+          console.log('File type detected from headers: PDF');
+          return 'pdf';
+        } else if (contentType.includes('image/')) {
+          console.log('File type detected from headers: Image');
+          return 'image';
         }
       }
-    } catch (headError) {
-      console.warn('HEAD request failed, falling back to extension-based detection:', headError);
-    }
-    
-    // If we can't determine from HEAD request, make a best guess
-    console.log('Could not determine file type from headers, guessing based on URL');
-    if (fileUrl.includes('pdf') || fileUrl.includes('document')) {
-      return 'pdf';
-    } else {
-      // Default to image if we can't determine
-      return 'image';
     }
   } catch (error) {
-    console.error('File type detection error:', error);
-    throw new Error(`Failed to detect file type: ${error.message}`);
+    console.log('HEAD request failed, falling back to extension-based detection:', error);
+  }
+  
+  // Fallback to extension-based detection
+  console.log('Could not determine file type from headers, guessing based on URL');
+  const url = new URL(fileUrl);
+  const path = url.pathname;
+  const extension = path.split('.').pop().toLowerCase();
+  
+  if (extension === 'pdf') {
+    console.log('File type detected from extension: PDF');
+    return 'pdf';
+  } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif'].includes(extension)) {
+    console.log('File type detected from extension: Image');
+    return 'image';
+  }
+  
+  // If we can't determine the type, default to image
+  console.log('Could not determine file type, defaulting to: Image');
+  return 'image';
+}
+
+// Helper function to convert Firebase Storage URLs to our proxy endpoint
+function convertToProxyUrl(fileUrl) {
+  try {
+    const url = new URL(fileUrl);
+    
+    // Check if it's a Firebase Storage URL
+    if (url.hostname.includes('firebasestorage.googleapis.com')) {
+      // Extract the path from the URL
+      // The path is in the format: /v0/b/[bucket]/o/[path]?alt=media&token=[token]
+      const pathMatch = url.pathname.match(/\/v0\/b\/[^\/]+\/o\/(.+)/);
+      
+      if (pathMatch && pathMatch[1]) {
+        const encodedPath = pathMatch[1];
+        // Extract userId and billId from the path if possible
+        const pathParts = decodeURIComponent(encodedPath).split('/');
+        
+        if (pathParts.length >= 2 && pathParts[0] === 'bills') {
+          const userId = pathParts[1];
+          // The billId might be part of the filename or a separate path component
+          const billIdMatch = pathParts[2]?.match(/(\d+)_(\w+)/);
+          const billId = billIdMatch ? billIdMatch[2] : null;
+          
+          // Construct the proxy URL with userId and billId if available
+          const origin = window.location.origin;
+          const proxyUrl = `${origin}/api/proxy-file?path=${encodedPath}${userId ? `&userId=${userId}` : ''}${billId ? `&billId=${billId}` : ''}`;
+          return proxyUrl;
+        }
+        
+        // If we can't extract userId and billId, just use the path
+        return `${window.location.origin}/api/proxy-file?path=${encodedPath}`;
+      }
+    }
+    
+    // If it's not a Firebase Storage URL or we can't parse it, return the original URL
+    return fileUrl;
+  } catch (error) {
+    console.error('Error converting to proxy URL:', error);
+    return fileUrl;
   }
 }
 
@@ -514,64 +466,47 @@ export async function analyzeDocumentClient(fileUrl) {
   console.log('Starting client-side document analysis...', { fileUrl });
   
   try {
-    // Detect file type first
+    // Detect the file type
     const fileType = await detectFileTypeClient(fileUrl);
-    console.log('File type detected:', fileType);
-
+    
     // Extract text based on file type
-    let extractionResult;
-    let extractedText;
+    console.log('Starting client-side text extraction process...');
+    let extractedText = '';
     
     if (fileType === 'pdf') {
-      extractionResult = await extractTextFromPDFClient(fileUrl);
-      extractedText = extractionResult.text;
+      extractedText = await extractTextFromPDFClient(fileUrl);
+    } else if (fileType === 'image') {
+      extractedText = await extractTextFromImageClient(fileUrl);
     } else {
-      extractionResult = await extractTextFromImageClient(fileUrl);
-      extractedText = extractionResult.text;
+      throw new Error(`Unsupported file type: ${fileType}`);
     }
-
-    if (!extractedText || extractedText.trim().length === 0) {
-      throw new Error('No text was extracted from the document');
-    }
-
-    console.log('Text extracted successfully, length:', extractedText.length);
-    console.log('First 200 chars:', extractedText.substring(0, 200));
-
-    // First verify if it's a medical bill
-    console.log('Verifying if document is a medical bill...');
-    const verificationResult = await processWithClientLLM(extractedText, true);
-    console.log('Verification result:', verificationResult);
-
-    let structuredData = null;
-    if (verificationResult.isMedicalBill) {
-      // Then extract data if it is a medical bill
-      console.log('Document is a medical bill, extracting data...');
-      structuredData = await processWithClientLLM(extractedText, false);
-      console.log('Data extraction complete:', structuredData);
-    }
-
-    // Ensure we're returning the extracted text
-    const result = {
-      success: true,
-      extractedText: extractedText,
-      extractedData: structuredData,
-      isMedicalBill: verificationResult.isMedicalBill,
-      confidence: verificationResult.confidence,
-      reason: verificationResult.reason,
-      fileType
-    };
     
-    console.log('Final client-side analysis result:', {
-      success: result.success,
-      textLength: result.extractedText.length,
-      hasExtractedData: !!result.extractedData,
-      isMedicalBill: result.isMedicalBill,
-      confidence: result.confidence,
-      fileType: result.fileType
+    if (!extractedText || extractedText.trim().length === 0) {
+      console.warn('Extracted text is empty or whitespace only');
+      extractedText = 'No text could be extracted from the document.';
+    }
+    
+    // Process the extracted text with the LLM
+    console.log('Processing extracted text with client-side LLM...');
+    console.log('Extracted text length:', extractedText.length);
+    console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
+    
+    const result = await processWithClientLLM(extractedText);
+    
+    // Add the extracted text to the result
+    result.extractedText = extractedText;
+    
+    console.log('Client-side analysis complete:', { 
+      textLength: extractedText.length,
+      resultSummary: {
+        hasPatientInfo: !!result.patientInfo,
+        hasBillInfo: !!result.billInfo,
+        servicesCount: result.services?.length || 0,
+        hasInsuranceInfo: !!result.insuranceInfo
+      }
     });
     
     return result;
-
   } catch (error) {
     console.error('Client-side analysis error:', error);
     throw new Error(`Client-side analysis failed: ${error.message}`);

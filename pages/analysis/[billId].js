@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { auth } from '../../firebase';
 import { theme } from '../../styles/theme';
 import Link from 'next/link';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { getFirestore } from 'firebase/firestore';
 import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
@@ -122,249 +122,213 @@ export default function BillAnalysis() {
   };
 
   const startDataExtraction = async (billData, currentUser) => {
-    if (!currentUser) {
-      console.error('No authenticated user');
-      setAnalysisStatus('error');
-      setExtractedData({ error: 'Authentication required' });
-      return;
-    }
-
-    setAnalysisStatus('loading');
-    setRawData(prev => ({ ...prev, loading: true }));
-    setError(null);
-
+    console.log('Starting analysis with data:', billData);
+    
     try {
-      console.log('Starting analysis with data:', {
+      // Set loading state
+      setIsLoading(true);
+      setProcessingMethod('');
+      
+      // Prepare the request body
+      const requestBody = {
         billId: billData.id,
         fileUrl: billData.fileUrl,
         userId: currentUser.uid
-      });
-
-      // Try to use the API first
+      };
+      
+      console.log('Request body:', JSON.stringify(requestBody));
+      
+      // Try server-side processing first
       try {
-        // Always use a relative URL for API calls
-        const apiUrl = `${window.location.origin}/api/analyze-full`;
-        console.log(`Calling API at ${apiUrl}`);
-        console.log('Current hostname:', window.location.hostname);
-        console.log('Current origin:', window.location.origin);
-        console.log('Current pathname:', window.location.pathname);
+        const hostname = window.location.hostname;
+        const origin = window.location.origin;
+        const pathname = window.location.pathname;
+        console.log('Current hostname:', hostname);
+        console.log('Current origin:', origin);
+        console.log('Current pathname:', pathname);
         
-        // Test the API endpoint first
-        try {
-          console.log('Testing API endpoint...');
-          const testResponse = await fetch(`${window.location.origin}/api/test`, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json',
-            }
-          });
-          
-          if (testResponse.ok) {
-            const testData = await testResponse.json();
-            console.log('Test API response:', testData);
-          } else {
-            console.log('Test API failed:', testResponse.status);
-          }
-        } catch (testError) {
-          console.error('Test API error:', testError);
-        }
+        // Use the analyze-full endpoint
+        const apiUrl = `${origin}/api/analyze-full`;
+        console.log('API URL:', apiUrl);
         
-        try {
-          // Log the request details
-          const requestBody = {
-            billId: billData.id,
-            fileUrl: billData.fileUrl,
-            userId: currentUser.uid
-          };
-          console.log('Request body:', JSON.stringify(requestBody));
-          console.log('API URL:', apiUrl);
-          
-          // Add more detailed error handling
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: JSON.stringify(requestBody)
-          });
-          
-          console.log('Response status:', response.status);
-          console.log('Response status text:', response.statusText);
-          
-          // Try to get response headers
-          const responseHeaders = {};
-          response.headers.forEach((value, key) => {
-            responseHeaders[key] = value;
-          });
-          console.log('Response headers:', JSON.stringify(responseHeaders));
-          
-          // Try to get response text even if it's not JSON
-          let responseText;
+        // Make the API request
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        });
+        
+        console.log('Response status:', response.status);
+        console.log('Response status text:', response.statusText);
+        console.log('Response headers:', Object.fromEntries([...response.headers.entries()]));
+        
+        // Check if the response is ok
+        if (!response.ok) {
+          let errorText = '';
           try {
-            responseText = await response.text();
-            console.log('Response text:', responseText);
+            errorText = await response.text();
+            console.log('Response text:', errorText);
           } catch (textError) {
-            console.error('Error getting response text:', textError);
+            console.error('Error reading response text:', textError);
+            errorText = 'No response body';
           }
           
-          // Parse JSON if possible
-          let data;
-          if (responseText) {
-            try {
-              data = JSON.parse(responseText);
-              console.log('Response data:', data);
-            } catch (jsonError) {
-              console.error('Error parsing JSON:', jsonError);
-              // Continue with the text response
-            }
-          }
+          throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+        
+        // Parse the response
+        const data = await response.json();
+        console.log('API response data:', data);
+        
+        // Update the state with the extracted data
+        if (data.extractedText) {
+          console.log('Server-side processing successful');
+          console.log('Raw data text updated, length:', data.extractedText.length);
+          console.log('First 200 chars of extracted text:', data.extractedText.substring(0, 200));
           
-          if (!response.ok) {
-            throw new Error(`API error: ${response.status} ${response.statusText} - ${responseText || 'No response body'}`);
-          }
-          
-          // Use the parsed data if available, otherwise use the original response.json()
-          const result = data || await response.json();
-          
-          // Update state with the extracted data
-          console.log('Setting extracted text from server response:', result.extractedText ? result.extractedText.substring(0, 100) + '...' : 'No text');
-          setExtractedData(result.extractedData);
-          setIsMedicalBill(result.isMedicalBill);
-          setRawData(prev => ({ ...prev, extractedText: result.extractedText || '' }));
-          setProcessingMethod('server');
-          
-          // Update the document in Firestore
-          const docRef = doc(db, 'bills', billData.id);
-          await updateDoc(docRef, {
-            extractedText: result.extractedText || '',
-            extractedData: result.extractedData,
-            isMedicalBill: result.isMedicalBill,
-            confidence: result.confidence,
-            reason: result.reason,
-            analyzedAt: new Date().toISOString(),
-            status: 'analyzed',
-            processingMethod: 'server'
+          setRawData({
+            extractedText: data.extractedText,
+            source: 'server'
           });
           
-          console.log('Document updated in Firestore with server-processed data');
-          
-        } catch (apiError) {
-          console.error('API request failed:', apiError);
-          throw apiError;
+          setExtractedData(data.extractedData || {});
+          setProcessingMethod('server');
+        } else {
+          throw new Error('No extracted text in server response');
         }
-      } catch (serverError) {
-        console.error('Server-side processing failed, trying client-side processing:', serverError);
         
+        // Update the document status in Firestore
+        await updateDoc(doc(db, 'bills', billData.id), {
+          status: 'analyzed',
+          analyzedAt: serverTimestamp(),
+          extractedData: data.extractedData || {}
+        });
+        
+        console.log('Document updated in Firestore with server-processed data');
+        setIsLoading(false);
+        return;
+        
+      } catch (serverError) {
+        console.log('Server-side processing failed, trying client-side processing:', serverError);
+        
+        // Fall back to client-side processing
         try {
-          // Try client-side processing
           console.log('Starting client-side document processing');
-          const clientResult = await analyzeDocumentClient(billData.fileUrl);
-          console.log('Client-side processing result:', clientResult);
+          setProcessingMethod('client');
           
-          if (clientResult && clientResult.extractedText) {
-            console.log('Setting extracted text from client processing:', clientResult.extractedText.substring(0, 100) + '...');
-            setRawData(prev => ({ ...prev, extractedText: clientResult.extractedText }));
-            setExtractedData(clientResult.extractedData);
-            setIsMedicalBill(clientResult.isMedicalBill);
-            setProcessingMethod('client');
+          // Process the document client-side
+          const result = await analyzeDocumentClient(billData.fileUrl);
+          
+          if (result && result.extractedText) {
+            console.log('Client-side processing successful');
+            console.log('Raw data text updated, length:', result.extractedText.length);
+            console.log('First 200 chars of extracted text:', result.extractedText.substring(0, 200));
             
-            // Update the document in Firestore
-            const docRef = doc(db, 'bills', billData.id);
-            await updateDoc(docRef, {
-              extractedText: clientResult.extractedText,
-              extractedData: clientResult.extractedData,
-              isMedicalBill: clientResult.isMedicalBill,
-              confidence: clientResult.confidence,
-              reason: clientResult.reason,
-              analyzedAt: new Date().toISOString(),
+            setRawData({
+              extractedText: result.extractedText,
+              source: 'client'
+            });
+            
+            setExtractedData(result);
+            
+            // Update the document status in Firestore
+            await updateDoc(doc(db, 'bills', billData.id), {
               status: 'analyzed',
-              processingMethod: 'client',
-              serverError: serverError.message
+              analyzedAt: serverTimestamp(),
+              extractedData: result
             });
             
             console.log('Document updated in Firestore with client-processed data');
           } else {
-            throw new Error('Client-side processing failed to extract text');
+            throw new Error('No extracted text in client-side result');
           }
-        } catch (clientError) {
-          console.error('Client-side processing also failed, using fallback data:', clientError);
           
-          // Fallback to dummy data
+        } catch (clientError) {
+          console.log('Client-side processing also failed, using fallback data:', clientError);
+          
+          // Use fallback dummy data
+          console.log('Setting fallback dummy text');
+          setProcessingMethod('fallback');
+          
+          const fallbackText = "This is fallback dummy text since both server-side and client-side processing failed to extract text from the document.";
+          setRawData({
+            extractedText: fallbackText,
+            source: 'fallback'
+          });
+          
+          console.log('Raw data text updated, length:', fallbackText.length);
+          console.log('First 200 chars of extracted text:', fallbackText);
+          
+          // Set dummy extracted data
           const dummyData = {
             patientInfo: {
-              fullName: "John Doe",
-              dateOfBirth: "Not found",
-              accountNumber: "Not found",
-              insuranceInfo: "Not found"
+              name: "Sample Patient",
+              dob: "01/01/1980",
+              address: "123 Main St, Anytown, USA"
             },
             billInfo: {
-              totalAmount: "$1,234.56",
-              serviceDates: "2025-01-01",
-              dueDate: "2025-02-01",
-              facilityName: "Example Hospital"
+              provider: "Sample Medical Center",
+              date: "01/15/2023",
+              totalAmount: "$1,234.56"
             },
             services: [
               {
-                description: "Medical service",
-                code: "Not found",
-                amount: "$1,234.56",
-                details: "Not found"
+                description: "Office Visit",
+                date: "01/15/2023",
+                amount: "$150.00"
               }
             ],
             insuranceInfo: {
-              amountCovered: "Not found",
-              patientResponsibility: "$1,234.56",
-              adjustments: "Not found"
+              provider: "Sample Insurance Co",
+              policyNumber: "ABC123456",
+              groupNumber: "XYZ789"
             }
           };
           
-          // Set dummy extracted text for display
-          const dummyText = "This is fallback dummy text since both server-side and client-side processing failed to extract text from the document.";
-          console.log('Setting fallback dummy text');
-          setRawData(prev => ({ ...prev, extractedText: dummyText }));
           setExtractedData(dummyData);
-          setIsMedicalBill(true);
-          setProcessingMethod('fallback');
           
-          // Update the document in Firestore
-          const docRef = doc(db, 'bills', billData.id);
-          await updateDoc(docRef, {
-            extractedText: dummyText,
-            extractedData: dummyData,
-            isMedicalBill: true,
-            confidence: 'low',
-            reason: "Fallback data - both server-side and client-side processing failed",
-            analyzedAt: new Date().toISOString(),
+          // Update the document status in Firestore
+          await updateDoc(doc(db, 'bills', billData.id), {
             status: 'analyzed',
-            processingMethod: 'fallback',
-            serverError: serverError.message,
-            clientError: clientError.message
+            analyzedAt: serverTimestamp(),
+            extractedData: dummyData,
+            processingError: `${serverError.message}; ${clientError.message}`
           });
           
           console.log('Document updated in Firestore with fallback data');
         }
       }
-
-      setAnalysisStatus('complete');
-      setRawData(prev => ({ ...prev, loading: false }));
+      
     } catch (error) {
-      console.error('Extraction error:', error);
-      setAnalysisStatus('error');
-      setError(error.message);
-      setRawData(prev => ({ ...prev, loading: false }));
+      console.error('Error in data extraction process:', error);
+      setError(`Error analyzing document: ${error.message}`);
+      
+      // Update the document status in Firestore
+      try {
+        await updateDoc(doc(db, 'bills', billData.id), {
+          status: 'error',
+          error: error.message,
+          updatedAt: serverTimestamp()
+        });
+        console.log('Document status updated to error in Firestore');
+      } catch (firestoreError) {
+        console.error('Error updating document status:', firestoreError);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Add a useEffect to log the rawData state when it changes
+  // Add useEffect hooks to log changes to rawData and extractedData
   useEffect(() => {
-    if (rawData.extractedText) {
+    if (rawData?.extractedText) {
       console.log('Raw data text updated, length:', rawData.extractedText.length);
       console.log('First 200 chars of extracted text:', rawData.extractedText.substring(0, 200));
     }
-  }, [rawData.extractedText]);
+  }, [rawData]);
 
-  // Add a useEffect to log the extractedData state when it changes
   useEffect(() => {
     if (extractedData) {
       console.log('Extracted data updated:', extractedData);
@@ -768,93 +732,32 @@ export default function BillAnalysis() {
             </div>
 
             {/* Raw Text */}
-            <div style={{
-              background: "#1E293B",
-              borderRadius: "0.75rem",
-              padding: "2rem",
-              border: "1px solid #334155"
-            }}>
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "1rem"
-              }}>
-                <h2 style={{
-                  fontSize: "1.5rem",
-                  fontWeight: "600",
-                  color: "#E2E8F0"
-                }}>Extracted Text</h2>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <button
-                    onClick={() => {
-                      console.log('Current raw text:', rawData.extractedText);
-                      alert(`Text length: ${rawData.extractedText?.length || 0}`);
-                    }}
-                    style={{
-                      padding: "0.5rem 1rem",
-                      background: "#4B5563",
-                      color: "#E2E8F0",
-                      border: "none",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.9rem"
-                    }}
-                  >
-                    Debug
-                  </button>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(rawData.extractedText)}
-                    style={{
-                      padding: "0.5rem 1rem",
-                      background: "#3B82F6",
-                      color: "#E2E8F0",
-                      border: "none",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.9rem"
-                    }}
-                  >
-                    Copy
-                  </button>
+            <div className="bg-white shadow rounded-lg p-6 mb-6">
+              <h2 className="text-xl font-semibold mb-4">Raw Text</h2>
+              <div className="flex justify-between items-center mb-2">
+                <div className="text-sm text-gray-500">
+                  {processingMethod && (
+                    <span>Processed using: <span className="font-medium">{processingMethod}</span> method</span>
+                  )}
                 </div>
+                <div className="text-sm text-gray-500">
+                  {rawData?.extractedText && (
+                    <span>Text length: {rawData.extractedText.length} characters</span>
+                  )}
+                </div>
+                <button
+                  className="text-sm bg-blue-100 hover:bg-blue-200 text-blue-800 px-3 py-1 rounded"
+                  onClick={() => {
+                    console.log('Raw text debug:', rawData?.extractedText);
+                    alert(`Raw text length: ${rawData?.extractedText?.length || 0} characters`);
+                  }}
+                >
+                  Debug
+                </button>
               </div>
-              {rawData.loading ? (
-                <div style={{
-                  padding: "2rem",
-                  textAlign: "center",
-                  color: "#94A3B8"
-                }}>
-                  Extracting text...
-                </div>
-              ) : (
-                <pre style={{
-                  background: "#0F172A",
-                  padding: "1.5rem",
-                  borderRadius: "0.75rem",
-                  color: "#94A3B8",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxHeight: "300px",
-                  overflowY: "auto",
-                  fontSize: "0.9rem",
-                  lineHeight: "1.6",
-                  border: "1px solid #334155"
-                }}>
-                  {rawData.extractedText || 'No text extracted yet'}
-                </pre>
-              )}
-              {/* Add text length indicator */}
-              {rawData.extractedText && (
-                <div style={{
-                  marginTop: "0.5rem",
-                  color: "#94A3B8",
-                  fontSize: "0.8rem",
-                  textAlign: "right"
-                }}>
-                  Text length: {rawData.extractedText.length} characters
-                </div>
-              )}
+              <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto whitespace-pre-wrap">
+                {rawData?.extractedText || 'No text extracted yet'}
+              </div>
             </div>
           </div>
         </div>
