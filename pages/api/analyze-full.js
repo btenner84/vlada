@@ -40,7 +40,7 @@ if (!getApps().length) {
     console.log('Firebase Admin SDK initialized successfully');
   } catch (error) {
     console.error('Error initializing Firebase Admin SDK:', error);
-    throw new Error(`Firebase initialization error: ${error.message}`);
+    // Don't throw here, we'll handle the error in the handler
   }
 } else {
   console.log('Firebase Admin SDK already initialized');
@@ -48,88 +48,58 @@ if (!getApps().length) {
   adminStorage = getStorage();
 }
 
-// Function to analyze the document
+// Function to analyze a document
 const analyzeDocument = async (fileUrl, userId, billId) => {
-  console.log('Starting document analysis...', { fileUrl, billId });
+  console.log(`Starting document analysis for bill ${billId} from user ${userId}`);
+  console.log(`File URL: ${fileUrl}`);
   
   try {
-    // Detect file type first
-    const fileType = await detectFileType(fileUrl);
-    console.log('File type detected:', fileType);
-
-    // Fetch file buffer
+    // Fetch the file buffer
+    console.log('Fetching file buffer...');
     const fileBuffer = await fetchFileBuffer(fileUrl);
-    console.log('File fetched, size:', fileBuffer.length);
-
+    console.log(`File buffer fetched, size: ${fileBuffer.length} bytes`);
+    
+    // Detect file type
+    console.log('Detecting file type...');
+    const fileType = await detectFileType(fileUrl);
+    console.log(`File type detected: ${fileType}`);
+    
     // Extract text based on file type
-    let extractedText;
+    console.log('Extracting text...');
+    let extractedText = '';
+    
     if (fileType === 'pdf') {
       extractedText = await extractTextFromPDF(fileBuffer);
-    } else {
+    } else if (fileType === 'image') {
       extractedText = await extractTextFromImage(fileBuffer);
+    } else {
+      throw new Error(`Unsupported file type: ${fileType}`);
     }
-
-    if (!extractedText || extractedText.trim().length === 0) {
-      throw new Error('No text was extracted from the document');
-    }
-
-    console.log('Text extracted successfully, length:', extractedText.length);
-
-    // First verify if it's a medical bill
-    console.log('Verifying if document is a medical bill...');
-    const verificationResult = await processWithLLM(extractedText, true);
-    console.log('Verification result:', verificationResult);
-
-    let structuredData = null;
-    if (verificationResult.isMedicalBill) {
-      // Then extract data if it is a medical bill
-      console.log('Document is a medical bill, extracting data...');
-      structuredData = await processWithLLM(extractedText, false);
-      console.log('Data extraction complete');
-    }
-
-    // Update document in Firestore
-    const docRef = adminDb.collection('bills').doc(billId);
-    await docRef.update({
-      extractedText,
-      extractedData: structuredData,
-      isMedicalBill: verificationResult.isMedicalBill,
-      confidence: verificationResult.confidence,
-      reason: verificationResult.reason,
-      analyzedAt: new Date().toISOString(),
-      status: 'analyzed'
-    });
-
+    
+    console.log(`Text extracted, length: ${extractedText.length} characters`);
+    console.log(`First 100 chars: ${extractedText.substring(0, 100)}`);
+    
+    // Process the extracted text with LLM
+    console.log('Processing text with LLM...');
+    const extractedData = await processWithLLM(extractedText);
+    console.log('LLM processing complete');
+    
+    // Return the results
     return {
       success: true,
       extractedText,
-      ...structuredData,
-      isMedicalBill: verificationResult.isMedicalBill,
-      confidence: verificationResult.confidence,
-      reason: verificationResult.reason
+      extractedData,
+      fileType
     };
-
   } catch (error) {
-    console.error('Analysis error:', error);
-    
-    // Update document status to failed
-    const docRef = adminDb.collection('bills').doc(billId);
-    await docRef.update({
-      status: 'failed',
-      error: error.message,
-      failedAt: new Date().toISOString()
-    });
-
-    throw new Error(`Analysis failed: ${error.message}`);
+    console.error('Error analyzing document:', error);
+    throw error;
   }
 };
 
 export default async function handler(req, res) {
   console.log('API Route: /api/analyze-full - Request received');
   console.log('Request Method:', req.method);
-  console.log('Request Headers:', JSON.stringify(req.headers));
-  console.log('Request URL:', req.url);
-  console.log('Request Query:', JSON.stringify(req.query));
   
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -148,48 +118,55 @@ export default async function handler(req, res) {
     return;
   }
   
-  // Handle POST request
-  if (req.method === 'POST') {
-    console.log('Handling POST request');
-    console.log('Request Body:', JSON.stringify(req.body));
+  // Only allow POST requests
+  if (req.method !== 'POST') {
+    console.log(`Rejecting ${req.method} request - only POST is allowed`);
+    res.setHeader('Allow', ['POST', 'OPTIONS']);
+    res.status(405).end(`Method ${req.method} Not Allowed`);
+    return;
+  }
 
+  try {
+    // Check if Firebase Admin SDK is initialized
+    if (!adminDb || !adminStorage) {
+      console.error('Firebase Admin SDK not initialized');
+      return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
+    }
+    
+    // Get the request body
+    const { fileUrl, userId, billId } = req.body;
+    
+    if (!fileUrl || !userId || !billId) {
+      console.log('Missing required parameters');
+      return res.status(400).json({ error: 'Missing required parameters: fileUrl, userId, billId' });
+    }
+    
+    console.log('Request parameters:', { fileUrl, userId, billId });
+    
+    // Verify document ownership
+    console.log('Verifying document ownership');
     try {
-      const { fileUrl, userId, billId } = req.body;
-      console.log('Extracted parameters:', { fileUrl, userId, billId });
-
-      if (!fileUrl || !userId || !billId) {
-        console.log('Missing required parameters:', { fileUrl: !!fileUrl, userId: !!userId, billId: !!billId });
-        return res.status(400).json({ 
-          error: 'Missing required parameters',
-          details: { fileUrl: !!fileUrl, userId: !!userId, billId: !!billId }
-        });
-      }
-
-      // Verify ownership
-      console.log('Verifying document ownership');
       const billDoc = await adminDb.collection('bills').doc(billId).get();
       if (!billDoc.exists || billDoc.data().userId !== userId) {
         console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
         return res.status(403).json({ error: 'Unauthorized access to this document' });
       }
-
-      console.log('Starting document analysis');
-      const result = await analyzeDocument(fileUrl, userId, billId);
-      console.log('Analysis completed successfully');
-      return res.status(200).json(result);
-
-    } catch (error) {
-      console.error('Handler error:', error);
-      return res.status(500).json({
-        error: error.message || 'Analysis failed',
-        details: error.toString(),
-        step: 'bill_verification'
-      });
+      console.log('Document ownership verified');
+    } catch (authError) {
+      console.error('Error verifying document ownership:', authError);
+      return res.status(500).json({ error: `Error verifying document ownership: ${authError.message}` });
     }
-  } else {
-    // Handle any other HTTP method
-    console.log(`Rejecting ${req.method} request - only POST and OPTIONS are allowed`);
-    res.setHeader('Allow', ['POST', 'OPTIONS']);
-    res.status(405).end(`Method ${req.method} Not Allowed`);
+    
+    // Analyze the document
+    console.log('Starting document analysis');
+    const result = await analyzeDocument(fileUrl, userId, billId);
+    
+    // Return the results
+    console.log('Analysis complete, returning results');
+    res.status(200).json(result);
+    
+  } catch (error) {
+    console.error('Error in analyze-full endpoint:', error);
+    res.status(500).json({ error: error.message || 'Error analyzing document' });
   }
 } 

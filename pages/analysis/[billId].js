@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { auth } from '../../firebase';
 import { theme } from '../../styles/theme';
 import Link from 'next/link';
-import { doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, deleteDoc, collection, getDocs, setDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { getFirestore } from 'firebase/firestore';
 import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
@@ -24,6 +24,7 @@ export default function BillAnalysis() {
   const [isMedicalBill, setIsMedicalBill] = useState(null);
   const [error, setError] = useState(null);
   const [processingMethod, setProcessingMethod] = useState(null); // server, client, or fallback
+  const [analysisVersion, setAnalysisVersion] = useState(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -31,6 +32,7 @@ export default function BillAnalysis() {
         setUser(user);
         if (billId) {
           await fetchBillData(billId, user);
+          await fetchAnalysisVersions(billId);
         }
       } else {
         router.push('/signin');
@@ -102,6 +104,55 @@ export default function BillAnalysis() {
     }
   };
 
+  const fetchAnalysisVersions = async (billId) => {
+    try {
+      const analysesRef = collection(db, 'bills', billId, 'analyses');
+      const analysesSnapshot = await getDocs(analysesRef);
+      const versions = analysesSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      if (versions.length > 0) {
+        // Get the latest version by analyzedAt timestamp
+        const latestVersion = versions.sort((a, b) => 
+          b.analyzedAt?.toDate?.() - a.analyzedAt?.toDate?.()
+        )[0];
+        setAnalysisVersion(latestVersion);
+        setExtractedData(latestVersion.extractedData);
+        setIsMedicalBill(latestVersion.isMedicalBill);
+        setProcessingMethod(latestVersion.processingMethod);
+        if (latestVersion.extractedText) {
+          setRawData(prev => ({ ...prev, extractedText: latestVersion.extractedText }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching analysis versions:', error);
+    }
+  };
+
+  const deleteAnalysis = async () => {
+    if (!window.confirm('Are you sure you want to delete this analysis? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      
+      // Delete the analysis document
+      if (analysisVersion?.id) {
+        await deleteDoc(doc(db, 'bills', billId, 'analyses', analysisVersion.id));
+      }
+      
+      // Redirect to dashboard
+      router.push('/dashboard');
+    } catch (error) {
+      console.error('Error deleting analysis:', error);
+      alert('Failed to delete analysis: ' + error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const generateSummary = async (text) => {
     try {
       const response = await fetch('/api/summarize', {
@@ -125,9 +176,17 @@ export default function BillAnalysis() {
     console.log('Starting analysis with data:', billData);
     
     try {
-      // Set loading state
       setIsLoading(true);
       setProcessingMethod('');
+      
+      // Create a new analysis version ID
+      const analysesRef = collection(db, 'bills', billData.id, 'analyses');
+      const existingAnalyses = await getDocs(analysesRef);
+      const versionNumber = existingAnalyses.size + 1;
+      const versionId = `analysis_${versionNumber.toString().padStart(2, '0')}`;
+      
+      // Create the new analysis document
+      const newAnalysisRef = doc(analysesRef, versionId);
       
       // Prepare the request body
       const requestBody = {
@@ -182,28 +241,24 @@ export default function BillAnalysis() {
         const data = await response.json();
         console.log('API response data:', data);
         
-        // Update the state with the extracted data
-        if (data.extractedText) {
-          console.log('Server-side processing successful');
-          console.log('Raw data text updated, length:', data.extractedText.length);
-          console.log('First 200 chars of extracted text:', data.extractedText.substring(0, 200));
-          
-          setRawData({
-            extractedText: data.extractedText,
-            source: 'server'
-          });
-          
-          setExtractedData(data.extractedData || {});
-          setProcessingMethod('server');
-        } else {
-          throw new Error('No extracted text in server response');
-        }
-        
-        // Update the document status in Firestore
-        await updateDoc(doc(db, 'bills', billData.id), {
+        // Update the analysis document instead of the bill document
+        await setDoc(newAnalysisRef, {
           status: 'analyzed',
           analyzedAt: serverTimestamp(),
-          extractedData: data.extractedData || {}
+          extractedData: data.extractedData || {},
+          extractedText: data.extractedText,
+          isMedicalBill: data.isMedicalBill,
+          confidence: data.confidence,
+          processingMethod: 'server',
+          userId: currentUser.uid,
+          version: versionNumber
+        });
+        
+        // Update the state with the new version
+        setAnalysisVersion({
+          id: versionId,
+          ...data,
+          version: versionNumber
         });
         
         console.log('Document updated in Firestore with server-processed data');
@@ -233,11 +288,24 @@ export default function BillAnalysis() {
             
             setExtractedData(result);
             
-            // Update the document status in Firestore
-            await updateDoc(doc(db, 'bills', billData.id), {
+            // Update the analysis document instead of the bill document
+            await setDoc(newAnalysisRef, {
               status: 'analyzed',
               analyzedAt: serverTimestamp(),
-              extractedData: result
+              extractedData: result,
+              extractedText: result.extractedText,
+              isMedicalBill: result.isMedicalBill,
+              confidence: result.confidence,
+              processingMethod: 'client',
+              userId: currentUser.uid,
+              version: versionNumber
+            });
+            
+            // Update the state with the new version
+            setAnalysisVersion({
+              id: versionId,
+              ...result,
+              version: versionNumber
             });
             
             console.log('Document updated in Firestore with client-processed data');
@@ -289,12 +357,24 @@ export default function BillAnalysis() {
           
           setExtractedData(dummyData);
           
-          // Update the document status in Firestore
-          await updateDoc(doc(db, 'bills', billData.id), {
+          // Update the analysis document instead of the bill document
+          await setDoc(newAnalysisRef, {
             status: 'analyzed',
             analyzedAt: serverTimestamp(),
             extractedData: dummyData,
-            processingError: `${serverError.message}; ${clientError.message}`
+            extractedText: fallbackText,
+            isMedicalBill: false,
+            confidence: 0,
+            processingMethod: 'fallback',
+            userId: currentUser.uid,
+            version: versionNumber
+          });
+          
+          // Update the state with the new version
+          setAnalysisVersion({
+            id: versionId,
+            ...dummyData,
+            version: versionNumber
           });
           
           console.log('Document updated in Firestore with fallback data');
@@ -305,16 +385,13 @@ export default function BillAnalysis() {
       console.error('Error in data extraction process:', error);
       setError(`Error analyzing document: ${error.message}`);
       
-      // Update the document status in Firestore
-      try {
-        await updateDoc(doc(db, 'bills', billData.id), {
+      // Update the analysis document with error status
+      if (analysisVersion?.id) {
+        await updateDoc(doc(db, 'bills', billId, 'analyses', analysisVersion.id), {
           status: 'error',
           error: error.message,
           updatedAt: serverTimestamp()
         });
-        console.log('Document status updated to error in Firestore');
-      } catch (firestoreError) {
-        console.error('Error updating document status:', firestoreError);
       }
     } finally {
       setIsLoading(false);
@@ -411,69 +488,458 @@ export default function BillAnalysis() {
         margin: "2rem auto",
         padding: "0 2rem"
       }}>
+        {/* Key Metrics Bar */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) minmax(0, 1fr)",
-          gap: "2rem"
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "1.5rem",
+          marginBottom: "2rem"
         }}>
-          {/* Document Viewer */}
+          {/* Total Amount */}
           <div style={{
-            position: "relative",
             background: "#1E293B",
+            padding: "1.5rem",
             borderRadius: "0.75rem",
-            overflow: "hidden",
-            height: isMobile ? "50vh" : "calc(100vh - 150px)",
-            position: "sticky",
-            top: "2rem",
-            border: "1px solid #334155"
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
           }}>
-            {isMedicalBill !== null && (
-              <div style={{
-                position: "absolute",
-                top: "1rem",
-                right: "1rem",
-                zIndex: 10,
-                padding: "0.5rem 1rem",
-                background: isMedicalBill ? "#10B981" : "#EF4444",
-                color: "white",
-                borderRadius: "0.5rem",
-                fontSize: "0.875rem",
-                fontWeight: "500"
-              }}>
-                {isMedicalBill ? "Medical Bill" : "Not a Medical Bill"}
-              </div>
-            )}
-            {billData?.fileUrl ? (
-              <iframe
-                src={billData.fileUrl}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  border: "none",
-                  background: "#fff"
-                }}
-                title="Bill Document"
-              />
-            ) : (
-              <div style={{
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#94A3B8"
-              }}>
-                Loading document...
-              </div>
-            )}
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Total Amount</div>
+            <div style={{ 
+              fontSize: "1.5rem", 
+              fontWeight: "600",
+              color: "#10B981" 
+            }}>
+              {extractedData?.billInfo?.totalAmount || '-'}
+            </div>
           </div>
 
-          {/* Analysis Section */}
+          {/* Service Date */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Service Date</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
+              {extractedData?.billInfo?.serviceDates || '-'}
+            </div>
+          </div>
+
+          {/* Due Date */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Due Date</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
+              {extractedData?.billInfo?.dueDate || '-'}
+            </div>
+          </div>
+
+          {/* Insurance Coverage */}
+          <div style={{
+            background: "#1E293B",
+            padding: "1.5rem",
+            borderRadius: "0.75rem",
+            border: "1px solid #334155",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.5rem"
+          }}>
+            <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Insurance Coverage</div>
+            <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
+              {extractedData?.insuranceInfo?.amountCovered || '-'}
+            </div>
+          </div>
+        </div>
+
+        {/* Main Grid */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr",
+          gap: "2rem"
+        }}>
+          {/* Left Column - Analysis Dashboard */}
           <div style={{
             display: "flex",
             flexDirection: "column",
             gap: "2rem"
           }}>
-            {/* Key Metrics */}
+            {/* Document Preview & AI Analysis Overview */}
+            <div style={{
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              border: "1px solid #334155",
+              overflow: "hidden"
+            }}>
+              {/* Header with Document Link */}
+              <div style={{
+                padding: "1.5rem",
+                borderBottom: "1px solid #334155",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center"
+              }}>
+                <h2 style={{
+                  fontSize: "1.5rem",
+                  fontWeight: "600",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem"
+                }}>
+                  <span>AI Analysis Overview</span>
+                  {isMedicalBill !== null && (
+                    <span style={{
+                      padding: "0.25rem 0.75rem",
+                      background: isMedicalBill ? "#059669" : "#DC2626",
+                      color: "white",
+                      borderRadius: "1rem",
+                      fontSize: "0.875rem"
+                    }}>
+                      {isMedicalBill ? "Verified Medical Bill" : "Not a Medical Bill"}
+                    </span>
+                  )}
+                </h2>
+                {billData?.fileUrl && (
+                  <Link 
+                    href={billData.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      padding: "0.75rem 1.25rem",
+                      background: "rgba(59, 130, 246, 0.1)",
+                      color: "#3B82F6",
+                      borderRadius: "0.5rem",
+                      textDecoration: "none",
+                      fontSize: "0.875rem",
+                      fontWeight: "500",
+                      transition: "all 0.2s",
+                      border: "1px solid rgba(59, 130, 246, 0.2)"
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    View Original Document
+                  </Link>
+                )}
+              </div>
+
+              {/* AI Analysis Content */}
+              <div style={{
+                padding: "2rem",
+                display: "grid",
+                gap: "2rem"
+              }}>
+                {/* Confidence Score */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "1.5rem",
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{
+                    width: "64px",
+                    height: "64px",
+                    borderRadius: "50%",
+                    background: "conic-gradient(#10B981 ${(extractedData?.confidence || 0) * 100}%, #1E293B 0)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}>
+                    <div style={{
+                      width: "56px",
+                      height: "56px",
+                      borderRadius: "50%",
+                      background: "#0F172A",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "1.125rem",
+                      fontWeight: "600",
+                      color: "#10B981"
+                    }}>
+                      {Math.round((extractedData?.confidence || 0) * 100)}%
+                    </div>
+                  </div>
+                  <div>
+                    <h3 style={{
+                      fontSize: "1.125rem",
+                      fontWeight: "600",
+                      marginBottom: "0.5rem"
+                    }}>AI Confidence Score</h3>
+                    <p style={{
+                      color: "#94A3B8",
+                      fontSize: "0.875rem"
+                    }}>Our AI system's confidence in the accuracy of extracted information</p>
+                  </div>
+                </div>
+
+                {/* Key Findings */}
+                <div style={{
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <h3 style={{
+                    fontSize: "1.125rem",
+                    fontWeight: "600",
+                    marginBottom: "1rem"
+                  }}>Key Findings</h3>
+                  <div style={{
+                    display: "grid",
+                    gap: "1rem"
+                  }}>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      padding: "0.75rem",
+                      background: "rgba(16, 185, 129, 0.1)",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(16, 185, 129, 0.2)"
+                    }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                        <polyline points="22 4 12 14.01 9 11.01"/>
+                      </svg>
+                      <span style={{ color: "#10B981" }}>Valid medical bill format detected</span>
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      padding: "0.75rem",
+                      background: "rgba(59, 130, 246, 0.1)",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(59, 130, 246, 0.2)"
+                    }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                      </svg>
+                      <span style={{ color: "#3B82F6" }}>{extractedData?.services?.length || 0} billable services identified</span>
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      padding: "0.75rem",
+                      background: "rgba(249, 115, 22, 0.1)",
+                      borderRadius: "0.5rem",
+                      border: "1px solid rgba(249, 115, 22, 0.2)"
+                    }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F97316" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="8" x2="12" y2="12"/>
+                        <line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      <span style={{ color: "#F97316" }}>Insurance coverage verification required</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Processing Details */}
+                <div style={{
+                  padding: "1.5rem",
+                  background: "#0F172A",
+                  borderRadius: "0.75rem",
+                  border: "1px solid #334155"
+                }}>
+                  <h3 style={{
+                    fontSize: "1.125rem",
+                    fontWeight: "600",
+                    marginBottom: "1rem"
+                  }}>Processing Details</h3>
+                  <div style={{
+                    display: "grid",
+                    gap: "0.75rem",
+                    fontSize: "0.875rem"
+                  }}>
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "0.5rem 0",
+                      borderBottom: "1px solid #334155"
+                    }}>
+                      <span style={{ color: "#94A3B8" }}>Processing Method</span>
+                      <span>{processingMethod || 'Not processed'}</span>
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "0.5rem 0",
+                      borderBottom: "1px solid #334155"
+                    }}>
+                      <span style={{ color: "#94A3B8" }}>Analysis Date</span>
+                      <span>{new Date().toLocaleDateString()}</span>
+                    </div>
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "0.5rem 0",
+                      borderBottom: "1px solid #334155"
+                    }}>
+                      <span style={{ color: "#94A3B8" }}>Document Type</span>
+                      <span>{billData?.fileType || 'Unknown'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Services Analysis */}
+            <div style={{
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              padding: "2rem",
+              border: "1px solid #334155"
+            }}>
+              <h2 style={{
+                fontSize: "1.5rem",
+                fontWeight: "600",
+                marginBottom: "1.5rem"
+              }}>Services Analysis</h2>
+              
+              {extractedData?.services ? (
+                <div style={{ display: "grid", gap: "1rem" }}>
+                  {extractedData.services.map((service, index) => (
+                    <div key={index} style={{
+                      background: "#0F172A",
+                      padding: "1.5rem",
+                      borderRadius: "0.5rem",
+                      border: "1px solid #334155"
+                    }}>
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        marginBottom: "0.5rem"
+                      }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: "500", marginBottom: "0.25rem" }}>
+                            {service.description}
+                          </div>
+                          <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>
+                            Code: {service.code || 'N/A'}
+                          </div>
+                        </div>
+                        <div style={{
+                          color: "#10B981",
+                          fontWeight: "600",
+                          marginLeft: "1rem"
+                        }}>
+                          {service.amount}
+                        </div>
+                      </div>
+                      {service.details && (
+                        <div style={{
+                          fontSize: "0.875rem",
+                          color: "#94A3B8",
+                          marginTop: "0.5rem",
+                          padding: "0.5rem",
+                          background: "rgba(148, 163, 184, 0.1)",
+                          borderRadius: "0.25rem"
+                        }}>
+                          {service.details}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  color: "#94A3B8",
+                  textAlign: "center",
+                  padding: "2rem"
+                }}>
+                  No services data available
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column - Patient Info & Actions */}
+          <div style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "2rem"
+          }}>
+            {/* Patient Information */}
+            <div style={{
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              padding: "2rem",
+              border: "1px solid #334155"
+            }}>
+              <h2 style={{
+                fontSize: "1.5rem",
+                fontWeight: "600",
+                marginBottom: "1.5rem"
+              }}>Patient Information</h2>
+              
+              <div style={{ display: "grid", gap: "1rem" }}>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Name</div>
+                  <div>{extractedData?.patientInfo?.fullName || '-'}</div>
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>DOB</div>
+                  <div>{extractedData?.patientInfo?.dateOfBirth || '-'}</div>
+                </div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Account</div>
+                  <div>{extractedData?.patientInfo?.accountNumber || '-'}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
             <div style={{
               background: "#1E293B",
               borderRadius: "0.75rem",
@@ -484,334 +950,140 @@ export default function BillAnalysis() {
                 fontSize: "1.5rem",
                 fontWeight: "600",
                 marginBottom: "1.5rem",
-                color: "#E2E8F0"
-              }}>Key Metrics</h2>
-
-              {analysisStatus === 'loading' && (
-                <div style={{
-                  textAlign: "center",
-                  padding: "2rem"
-                }}>
-                  <div style={{
-                    width: "40px",
-                    height: "40px",
-                    margin: "0 auto 1rem",
-                    border: "3px solid rgba(255, 255, 255, 0.1)",
-                    borderTopColor: "#3B82F6",
-                    borderRadius: "50%",
-                    animation: "spin 1s linear infinite"
-                  }} />
-                  <p style={{ color: "#94A3B8" }}>Analyzing your bill...</p>
-                </div>
-              )}
-
-              {analysisStatus === 'complete' && extractedData && (
-                <div style={{ display: "grid", gap: "1.5rem" }}>
-                  {/* Key Metrics Grid */}
-                  <div style={{
-                    display: "grid",
-                    gap: "1rem",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))"
-                  }}>
-                    {/* Total Amount */}
-                    <div style={{
-                      background: "#0F172A",
-                      padding: "1rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #334155"
-                    }}>
-                      <p style={{ color: "#94A3B8", marginBottom: "0.5rem" }}>Total Amount</p>
-                      <p style={{ color: "#E2E8F0", fontSize: "1.25rem", fontWeight: "600" }}>
-                        {extractedData.billInfo?.totalAmount || '-'}
-                      </p>
-                    </div>
-
-                    {/* Service Date */}
-                    <div style={{
-                      background: "#0F172A",
-                      padding: "1rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #334155"
-                    }}>
-                      <p style={{ color: "#94A3B8", marginBottom: "0.5rem" }}>Service Date</p>
-                      <p style={{ color: "#E2E8F0", fontSize: "1.25rem", fontWeight: "600" }}>
-                        {extractedData.billInfo?.serviceDates || '-'}
-                      </p>
-                    </div>
-
-                    {/* Due Date */}
-                    <div style={{
-                      background: "#0F172A",
-                      padding: "1rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #334155"
-                    }}>
-                      <p style={{ color: "#94A3B8", marginBottom: "0.5rem" }}>Due Date</p>
-                      <p style={{ color: "#E2E8F0", fontSize: "1.25rem", fontWeight: "600" }}>
-                        {extractedData.billInfo?.dueDate || '-'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Patient Info */}
-                  <div style={{
-                    background: "#0F172A",
-                    padding: "1.5rem",
-                    borderRadius: "0.75rem",
-                    border: "1px solid #334155"
-                  }}>
-                    <h3 style={{
-                      fontSize: "1.1rem",
-                      fontWeight: "600",
-                      marginBottom: "1rem",
-                      color: "#E2E8F0"
-                    }}>Patient Information</h3>
-                    <div style={{ display: "grid", gap: "0.75rem" }}>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 2fr",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#94A3B8" }}>Name</div>
-                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.fullName || '-'}</div>
-                      </div>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 2fr",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#94A3B8" }}>DOB</div>
-                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.dateOfBirth || '-'}</div>
-                      </div>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 2fr",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#94A3B8" }}>Account</div>
-                        <div style={{ color: "#E2E8F0" }}>{extractedData.patientInfo?.accountNumber || '-'}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Services Summary */}
-                  <div style={{
-                    background: "#0F172A",
-                    padding: "1.5rem",
-                    borderRadius: "0.75rem",
-                    border: "1px solid #334155"
-                  }}>
-                    <h3 style={{
-                      fontSize: "1.1rem",
-                      fontWeight: "600",
-                      marginBottom: "1rem",
-                      color: "#E2E8F0"
-                    }}>Services</h3>
-                    <div style={{ display: "grid", gap: "0.75rem" }}>
-                      {extractedData.services?.map((service, index) => (
-                        <div key={index} style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr auto",
-                          gap: "1rem",
-                          padding: "0.75rem",
-                          background: "#1E293B",
-                          borderRadius: "0.5rem",
-                          border: "1px solid #334155"
-                        }}>
-                          <div style={{ color: "#E2E8F0" }}>{service.description || '-'}</div>
-                          <div style={{ color: "#94A3B8" }}>{service.amount || '-'}</div>
-                        </div>
-                      )) || <p style={{ color: "#94A3B8" }}>No services found</p>}
-                    </div>
-                  </div>
-
-                  {/* Insurance Info */}
-                  <div style={{
-                    background: "#0F172A",
-                    padding: "1.5rem",
-                    borderRadius: "0.75rem",
-                    border: "1px solid #334155"
-                  }}>
-                    <h3 style={{
-                      fontSize: "1.1rem",
-                      fontWeight: "600",
-                      marginBottom: "1rem",
-                      color: "#E2E8F0"
-                    }}>Insurance Information</h3>
-                    <div style={{ display: "grid", gap: "0.75rem" }}>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#E2E8F0" }}>Insurance Coverage</div>
-                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.amountCovered || '-'}</div>
-                      </div>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#E2E8F0" }}>Patient Responsibility</div>
-                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.patientResponsibility || '-'}</div>
-                      </div>
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        gap: "1rem",
-                        padding: "0.75rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155"
-                      }}>
-                        <div style={{ color: "#E2E8F0" }}>Adjustments</div>
-                        <div style={{ color: "#94A3B8" }}>{extractedData.insuranceInfo?.adjustments || '-'}</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {analysisStatus === 'error' && (
-                <div style={{
-                  padding: "2rem",
-                  background: "rgba(239, 68, 68, 0.1)",
-                  borderRadius: "0.75rem",
-                  textAlign: "center",
-                  border: "1px solid rgba(239, 68, 68, 0.2)"
-                }}>
-                  <h3 style={{
-                    color: "#EF4444",
-                    marginBottom: "1rem"
-                  }}>Analysis Failed</h3>
-                  {error && (
-                    <div style={{
-                      marginBottom: "1.5rem",
-                      color: "#94A3B8"
-                    }}>
-                      <p>{error}</p>
-                    </div>
-                  )}
-                  <button
-                    onClick={() => billData && startDataExtraction(billData, user)}
-                    style={{
-                      padding: "0.75rem 1.5rem",
-                      background: "#3B82F6",
-                      color: "#E2E8F0",
-                      border: "none",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.9rem",
-                      fontWeight: "500"
-                    }}
-                  >
-                    Try Again
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Raw Text Section */}
-            <div style={{
-              background: "#1E293B",
-              borderRadius: "0.75rem",
-              padding: "2rem",
-              border: "1px solid #334155",
-              marginBottom: "1.5rem"
-            }}>
-              <div style={{
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "1rem"
+                alignItems: "center"
               }}>
-                <h2 style={{
-                  fontSize: "1.5rem",
-                  fontWeight: "600",
-                  color: "#E2E8F0"
-                }}>Raw Text</h2>
-                <div style={{ display: "flex", gap: "0.5rem" }}>
-                  <div style={{ color: "#94A3B8", fontSize: "0.9rem", marginRight: "1rem" }}>
-                    {processingMethod && (
-                      <span>Processed using: <span style={{ fontWeight: "500" }}>{processingMethod}</span> method</span>
-                    )}
-                  </div>
-                  <div style={{ color: "#94A3B8", fontSize: "0.9rem", marginRight: "1rem" }}>
-                    {rawData?.extractedText && (
-                      <span>Length: {rawData.extractedText.length} chars</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => {
-                      console.log('Raw text debug:', rawData?.extractedText);
-                      alert(`Raw text length: ${rawData?.extractedText?.length || 0} characters`);
-                    }}
-                    style={{
-                      padding: "0.5rem 1rem",
-                      background: "#4B5563",
-                      color: "#E2E8F0",
-                      border: "none",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.9rem"
-                    }}
-                  >
-                    Debug
-                  </button>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(rawData?.extractedText || '')}
-                    style={{
-                      padding: "0.5rem 1rem",
-                      background: "#3B82F6",
-                      color: "#E2E8F0",
-                      border: "none",
-                      borderRadius: "0.5rem",
-                      cursor: "pointer",
-                      fontSize: "0.9rem"
-                    }}
-                  >
-                    Copy
-                  </button>
-                </div>
+                <span>Actions</span>
+                {analysisVersion && (
+                  <span style={{
+                    fontSize: "0.875rem",
+                    color: "#94A3B8",
+                    fontWeight: "normal"
+                  }}>
+                    Version {analysisVersion.version}
+                  </span>
+                )}
+              </h2>
+              
+              <div style={{ display: "grid", gap: "1rem" }}>
+                <button style={{
+                  padding: "1rem",
+                  background: "#3B82F6",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "0.5rem",
+                  fontWeight: "500",
+                  cursor: "pointer"
+                }}>
+                  Generate Dispute Letter
+                </button>
+                <button style={{
+                  padding: "1rem",
+                  background: "#10B981",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "0.5rem",
+                  fontWeight: "500",
+                  cursor: "pointer"
+                }}>
+                  Download Analysis Report
+                </button>
+                <button style={{
+                  padding: "1rem",
+                  background: "#6B7280",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "0.5rem",
+                  fontWeight: "500",
+                  cursor: "pointer"
+                }}>
+                  Share Analysis
+                </button>
+                <button 
+                  onClick={deleteAnalysis}
+                  style={{
+                    padding: "1rem",
+                    background: "#DC2626",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "0.5rem",
+                    fontWeight: "500",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "0.5rem"
+                  }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                  </svg>
+                  Delete Analysis
+                </button>
               </div>
-              <pre style={{
-                background: "#0F172A",
-                padding: "1.5rem",
-                borderRadius: "0.75rem",
-                color: "#94A3B8",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: "300px",
-                overflowY: "auto",
-                fontSize: "0.9rem",
-                lineHeight: "1.6",
-                border: "1px solid #334155"
-              }}>
-                {rawData?.extractedText || 'No text extracted yet'}
-              </pre>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* OCR Text Button */}
+      <div style={{
+        maxWidth: "1400px",
+        margin: "0 auto 2rem auto",
+        padding: "0 2rem",
+        display: "flex",
+        justifyContent: "flex-end"
+      }}>
+        <button
+          onClick={() => {
+            if (rawData?.extractedText) {
+              alert(rawData.extractedText);
+            } else {
+              let errorMessage = "OCR text extraction failed.\n\nPossible reasons:\n";
+              if (error) {
+                errorMessage += `- ${error}\n`;
+              }
+              if (!billData?.fileUrl) {
+                errorMessage += "- No document file was found\n";
+              }
+              if (processingMethod === 'fallback') {
+                errorMessage += "- Both server-side and client-side processing failed\n";
+              }
+              if (!processingMethod) {
+                errorMessage += "- Document processing has not started\n";
+              }
+              alert(errorMessage);
+            }
+          }}
+          style={{
+            padding: "0.5rem 1rem",
+            background: "#1E293B",
+            color: "#E2E8F0",
+            border: "1px solid #334155",
+            borderRadius: "0.375rem",
+            fontSize: "0.875rem",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            transition: "all 0.2s"
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.background = "#334155";
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = "#1E293B";
+          }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+          View Raw OCR Text
+        </button>
       </div>
     </div>
   );

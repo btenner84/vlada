@@ -2,10 +2,27 @@ import pdf from 'pdf-parse';
 import OpenAI from 'openai';
 import fetch from 'node-fetch';
 import { getWorker, terminateWorker } from './tesseractWorker';
+import sharp from 'sharp';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+// Add image pre-processing functions
+async function preprocessImage(imageBuffer) {
+  try {
+    console.log('Pre-processing image...');
+    return await sharp(imageBuffer)
+      .grayscale() // Convert to grayscale
+      .normalize() // Normalize the image contrast
+      .sharpen() // Sharpen the image
+      .threshold(128) // Apply binary threshold
+      .toBuffer();
+  } catch (error) {
+    console.error('Image pre-processing error:', error);
+    return imageBuffer; // Return original buffer if processing fails
+  }
+}
 
 export async function extractTextFromPDF(pdfBuffer) {
   try {
@@ -38,28 +55,47 @@ export async function extractTextFromImage(imageBuffer) {
   let worker = null;
   
   try {
+    // Pre-process the image
+    console.log('Pre-processing image for OCR...');
+    const processedBuffer = await preprocessImage(imageBuffer);
+    console.log('Image pre-processing complete');
+    
     worker = await getWorker();
     console.log('Got Tesseract worker');
     
-    // Convert buffer to base64
-    const base64Image = imageBuffer.toString('base64');
+    // Convert processed buffer to base64
+    const base64Image = processedBuffer.toString('base64');
     
     // Recognize text from base64
     console.log('Starting OCR recognition...');
-    const { data: { text } } = await worker.recognize(`data:image/png;base64,${base64Image}`);
-    console.log('OCR recognition completed');
+    const { data: { text, confidence } } = await worker.recognize(`data:image/png;base64,${base64Image}`);
+    console.log('OCR recognition completed with confidence:', confidence);
 
     if (!text || text.trim().length === 0) {
       throw new Error('No text was extracted from the image');
     }
 
-    console.log('OCR completed, text length:', text.length);
-    console.log('First 200 chars:', text.substring(0, 200));
+    // Post-process the extracted text
+    const processedText = text
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/[^\x20-\x7E\n]/g, '') // Remove non-printable characters
+      .trim();
+
+    console.log('OCR completed, text length:', processedText.length);
+    console.log('First 200 chars:', processedText.substring(0, 200));
     
-    return text;
+    return processedText;
   } catch (error) {
     console.error('Text extraction error:', error);
     throw new Error(`Text extraction failed: ${error.message}`);
+  } finally {
+    if (worker) {
+      try {
+        await terminateWorker();
+      } catch (error) {
+        console.error('Error terminating worker:', error);
+      }
+    }
   }
 }
 

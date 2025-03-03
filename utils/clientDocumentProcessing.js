@@ -43,9 +43,15 @@ export async function extractTextFromImageClient(imageUrl) {
     // Get the Tesseract worker
     const worker = await getClientWorker();
     
-    // Fetch the image
+    // Fetch the image with credentials
     console.log('Fetching image from URL:', proxyUrl);
-    const response = await fetch(proxyUrl);
+    const response = await fetch(proxyUrl, {
+      credentials: 'include',
+      headers: {
+        'Accept': 'image/*'
+      }
+    });
+    
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     }
@@ -62,6 +68,10 @@ export async function extractTextFromImageClient(imageUrl) {
     const extractedText = result.data.text;
     console.log('Text extracted from image, length:', extractedText.length);
     console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
+    
+    if (!extractedText || extractedText.trim().length === 0) {
+      throw new Error('No text was extracted from the image');
+    }
     
     return extractedText;
   } catch (error) {

@@ -16,7 +16,16 @@ export async function getWorker() {
     await worker.setParameters({
       tessedit_ocr_engine_mode: 3,
       preserve_interword_spaces: '1',
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/" '
+      tessedit_pageseg_mode: '1',
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?@#$%&*()-+=:;/"\'$¢£€¥%[]{}()<>\\| ',
+      tessedit_write_images: true,
+      tessedit_create_pdf: '1',
+      tessedit_create_hocr: '1',
+      tessedit_enable_doc_dict: '1',
+      tessedit_enable_new_segsearch: '1',
+      textord_heavy_nr: '1',
+      textord_force_make_prop_words: '1',
+      tessedit_do_invert: '0'
     });
     console.log('Worker initialized successfully');
   }

@@ -23,6 +23,8 @@ export default function Dashboard() {
   const [selectedBill, setSelectedBill] = useState('');
   const [selectedBillForDispute, setSelectedBillForDispute] = useState('');
   const [analyzedBills, setAnalyzedBills] = useState([]);
+  const [editingFileName, setEditingFileName] = useState(null);
+  const [newFileName, setNewFileName] = useState('');
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -310,7 +312,7 @@ export default function Dashboard() {
       return;
     }
     
-    if (!confirm('Are you sure you want to delete this bill?')) return;
+    if (!confirm('Are you sure you want to delete this bill? This action cannot be undone.')) return;
     
     setDeletingFile(true);
     try {
@@ -324,6 +326,15 @@ export default function Dashboard() {
       const billData = billDoc.data();
       console.log('Found bill data:', billData);
       
+      // Delete all analyses for this bill
+      const analysesRef = collection(db, 'bills', billId, 'analyses');
+      const analysesSnapshot = await getDocs(analysesRef);
+      const deleteAnalysesPromises = analysesSnapshot.docs.map(doc => 
+        deleteDoc(doc.ref)
+      );
+      await Promise.all(deleteAnalysesPromises);
+      console.log('Successfully deleted all analyses');
+      
       // Delete from Storage
       const storageRef = ref(storage, storagePath);
       await deleteObject(storageRef);
@@ -335,6 +346,7 @@ export default function Dashboard() {
       
       // Update UI
       setRecentUploads(prev => prev.filter(upload => upload.id !== billId));
+      setAnalyzedBills(prev => prev.filter(bill => bill.id !== billId));
       
       // Update user profile
       const userProfileRef = doc(db, 'userProfiles', user.uid);
@@ -355,6 +367,7 @@ export default function Dashboard() {
         try {
           await deleteDoc(doc(db, 'bills', billId));
           setRecentUploads(prev => prev.filter(upload => upload.id !== billId));
+          setAnalyzedBills(prev => prev.filter(bill => bill.id !== billId));
           alert('Bill record deleted (file was already removed)');
         } catch (cleanupError) {
           console.error('Cleanup error:', cleanupError);
@@ -504,6 +517,34 @@ export default function Dashboard() {
 
   const handleGenerateDispute = () => {
     // Implementation of handleGenerateDispute function
+  };
+
+  const handleEditFileName = async (uploadId, currentName) => {
+    if (editingFileName === uploadId) {
+      try {
+        // Update in Firestore
+        await updateDoc(doc(db, 'bills', uploadId), {
+          fileName: newFileName
+        });
+        
+        // Update UI
+        setRecentUploads(prev => prev.map(upload => 
+          upload.id === uploadId ? { ...upload, fileName: newFileName } : upload
+        ));
+        setAnalyzedBills(prev => prev.map(bill => 
+          bill.id === uploadId ? { ...bill, fileName: newFileName } : bill
+        ));
+        
+        setEditingFileName(null);
+        setNewFileName('');
+      } catch (error) {
+        console.error('Error updating filename:', error);
+        alert('Failed to update filename');
+      }
+    } else {
+      setEditingFileName(uploadId);
+      setNewFileName(currentName);
+    }
   };
 
   return (
@@ -789,26 +830,83 @@ export default function Dashboard() {
                 }}>
                   {recentUploads.map((upload, index) => (
                     <div key={index} style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      background: "rgba(255, 255, 255, 0.05)",
+                      borderRadius: theme.borderRadius.md,
                       padding: "1rem",
-                      background: "rgba(255, 255, 255, 0.03)",
-                      borderRadius: theme.borderRadius.sm,
-                      border: "1px solid rgba(255, 255, 255, 0.05)"
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      marginBottom: "0.75rem"
                     }}>
                       <div style={{
                         display: "flex",
-                        justifyContent: "space-between",
-                        marginBottom: "0.5rem",
-                        alignItems: "center"
+                        flexDirection: "column",
+                        gap: "0.25rem"
                       }}>
-                        <span style={{ fontWeight: "500" }}>{upload.fileName}</span>
-                        <span style={{
+                        {editingFileName === upload.id ? (
+                          <input
+                            type="text"
+                            value={newFileName}
+                            onChange={(e) => setNewFileName(e.target.value)}
+                            style={{
+                              background: "rgba(255, 255, 255, 0.1)",
+                              border: "1px solid rgba(255, 255, 255, 0.2)",
+                              borderRadius: theme.borderRadius.sm,
+                              color: theme.colors.textPrimary,
+                              padding: "0.25rem 0.5rem",
+                              fontSize: "0.95rem",
+                              width: "100%"
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleEditFileName(upload.id, upload.fileName);
+                              } else if (e.key === 'Escape') {
+                                setEditingFileName(null);
+                                setNewFileName('');
+                              }
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <div style={{
+                            fontSize: "0.95rem",
+                            fontWeight: "500",
+                            color: theme.colors.textPrimary,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "0.5rem"
+                          }}>
+                            {upload.fileName}
+                            <button
+                              onClick={() => handleEditFileName(upload.id, upload.fileName)}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                padding: "0.25rem",
+                                cursor: "pointer",
+                                opacity: 0.7,
+                                transition: "opacity 0.2s ease"
+                              }}
+                              onMouseEnter={(e) => e.target.style.opacity = 1}
+                              onMouseLeave={(e) => e.target.style.opacity = 0.7}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                        <div style={{
                           fontSize: "0.8rem",
                           color: theme.colors.textSecondary
-                        }}>{upload.uploadedAt}</span>
+                        }}>
+                          {new Date(upload.uploadedAt).toLocaleDateString()}
+                        </div>
                       </div>
                       <div style={{
                         display: "flex",
-                        justifyContent: "space-between",
+                        gap: "0.5rem",
                         alignItems: "center"
                       }}>
                         <a
@@ -816,36 +914,74 @@ export default function Dashboard() {
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{
-                            color: theme.colors.primary,
-                            textDecoration: "none",
-                            fontSize: "0.9rem",
+                            background: "rgba(31, 41, 55, 0.7)",
+                            border: "1px solid rgba(255, 255, 255, 0.2)",
+                            padding: "0.5rem",
+                            borderRadius: theme.borderRadius.md,
+                            color: theme.colors.textPrimary,
+                            cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
-                            gap: "0.25rem"
+                            justifyContent: "center",
+                            transition: "all 0.2s ease",
+                            width: "32px",
+                            height: "32px",
+                            backdropFilter: "blur(8px)",
+                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.background = "rgba(31, 41, 55, 0.8)";
+                            e.target.style.borderColor = "rgba(255, 255, 255, 0.3)";
+                            e.target.style.transform = "scale(1.05)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.background = "rgba(31, 41, 55, 0.7)";
+                            e.target.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                            e.target.style.transform = "scale(1)";
                           }}
                         >
-                          View Bill 👁️
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/>
+                            <line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
                         </a>
                         <button
-                          onClick={() => {
-                            console.log('Delete clicked:', { id: upload.id, storagePath: upload.storagePath });
-                            handleDelete(upload.id, upload.storagePath);
-                          }}
+                          onClick={() => handleDelete(upload.id, upload.storagePath)}
                           disabled={deletingFile}
                           style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "#EF4444",
+                            background: "rgba(31, 41, 55, 0.7)",
+                            border: "1px solid rgba(220, 38, 38, 0.3)",
+                            color: "#DC2626",
                             cursor: deletingFile ? "not-allowed" : "pointer",
                             opacity: deletingFile ? 0.5 : 1,
                             padding: "0.5rem",
-                            fontSize: "0.9rem",
                             display: "flex",
                             alignItems: "center",
-                            gap: "0.25rem"
+                            justifyContent: "center",
+                            borderRadius: theme.borderRadius.md,
+                            transition: "all 0.2s ease",
+                            width: "32px",
+                            height: "32px",
+                            backdropFilter: "blur(8px)",
+                            boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.background = "rgba(31, 41, 55, 0.8)";
+                            e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
+                            e.target.style.transform = "scale(1.05)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.background = "rgba(31, 41, 55, 0.7)";
+                            e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
+                            e.target.style.transform = "scale(1)";
                           }}
                         >
-                          {deletingFile ? "Deleting..." : "Delete 🗑️"}
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 6h18"/>
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -959,49 +1095,42 @@ export default function Dashboard() {
                           background: "rgba(255, 255, 255, 0.05)",
                           borderRadius: theme.borderRadius.md,
                           padding: "1rem",
-                          border: "1px solid rgba(255, 255, 255, 0.1)"
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center"
                         }}
                       >
                         <div style={{
                           display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: "0.5rem"
+                          flexDirection: "column",
+                          gap: "0.25rem",
+                          flex: 1,
+                          minWidth: 0 // Enable text truncation
                         }}>
-                          <span style={{ color: theme.colors.textPrimary, fontWeight: "500" }}>
-                            {bill.fileName}
-                          </span>
-                          <span style={{
-                            padding: "0.25rem 0.5rem",
-                            borderRadius: "0.25rem",
-                            fontSize: "0.75rem",
-                            background: bill.isMedicalBill ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)",
-                            color: bill.isMedicalBill ? "#10B981" : "#EF4444",
-                            border: `1px solid ${bill.isMedicalBill ? "rgba(16, 185, 129, 0.2)" : "rgba(239, 68, 68, 0.2)"}`
+                          <div style={{
+                            fontSize: "0.95rem",
+                            fontWeight: "500",
+                            color: theme.colors.textPrimary,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis"
                           }}>
-                            {bill.isMedicalBill ? "Medical Bill" : "Not Medical Bill"}
-                          </span>
-                        </div>
-                        <div style={{
-                          fontSize: "0.9rem",
-                          color: theme.colors.textSecondary,
-                          marginBottom: "0.5rem"
-                        }}>
-                          <div>Amount: {bill.totalAmount}</div>
-                          <div>Service Date: {bill.serviceDates}</div>
-                        </div>
-                        <div style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginTop: "0.75rem"
-                        }}>
-                          <span style={{
+                            {bill.fileName}
+                          </div>
+                          <div style={{
                             fontSize: "0.8rem",
                             color: theme.colors.textSecondary
                           }}>
-                            Analyzed: {bill.analyzedAt}
-                          </span>
+                            {new Date(bill.analyzedAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <div style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          alignItems: "center",
+                          flexShrink: 0 // Prevent button from shrinking
+                        }}>
                           <Link
                             href={`/analysis/${bill.id}`}
                             style={{
@@ -1010,14 +1139,63 @@ export default function Dashboard() {
                               color: theme.colors.textPrimary,
                               borderRadius: theme.borderRadius.md,
                               textDecoration: "none",
-                              fontSize: "0.9rem",
+                              fontSize: "0.875rem",
                               display: "flex",
                               alignItems: "center",
-                              gap: "0.25rem"
+                              gap: "0.25rem",
+                              transition: "all 0.2s ease",
+                              border: "none",
+                              width: "120px", // Fixed width
+                              justifyContent: "center" // Center text
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.transform = "scale(1.05)";
+                              e.target.style.opacity = "0.9";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.transform = "scale(1)";
+                              e.target.style.opacity = "1";
                             }}
                           >
-                            View Analysis 📊
+                            View Analysis
                           </Link>
+                          <button
+                            onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
+                            disabled={deletingFile}
+                            style={{
+                              background: "rgba(31, 41, 55, 0.7)",
+                              border: "1px solid rgba(220, 38, 38, 0.3)",
+                              color: "#DC2626",
+                              cursor: deletingFile ? "not-allowed" : "pointer",
+                              opacity: deletingFile ? 0.5 : 1,
+                              padding: "0.5rem",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: theme.borderRadius.md,
+                              transition: "all 0.2s ease",
+                              width: "32px",
+                              height: "32px",
+                              backdropFilter: "blur(8px)",
+                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
+                              e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
+                              e.target.style.transform = "scale(1.05)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
+                              e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
+                              e.target.style.transform = "scale(1)";
+                            }}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 6h18"/>
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                            </svg>
+                          </button>
                         </div>
                       </div>
                     ))}

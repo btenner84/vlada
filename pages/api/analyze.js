@@ -13,18 +13,21 @@ import fetch from 'node-fetch';
 // Add better error handling and logging for image processing
 const analyzeDocument = async (fileUrl, userId, billId) => {
   console.log('Starting document analysis...', { fileUrl, billId });
+  let fileType, fileBuffer, extractedText;
   
   try {
     // Detect file type first
-    const fileType = await detectFileType(fileUrl);
+    console.log('Detecting file type...');
+    fileType = await detectFileType(fileUrl);
     console.log('File type detected:', fileType);
 
     // Fetch file buffer
-    const fileBuffer = await fetchFileBuffer(fileUrl);
-    console.log('File fetched, size:', fileBuffer.length);
+    console.log('Fetching file buffer...');
+    fileBuffer = await fetchFileBuffer(fileUrl);
+    console.log('File fetched, size:', fileBuffer.length, 'bytes');
 
     // Extract text based on file type
-    let extractedText;
+    console.log(`Starting text extraction for ${fileType} file...`);
     if (fileType === 'pdf') {
       extractedText = await extractTextFromPDF(fileBuffer);
     } else {
@@ -32,10 +35,15 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     }
 
     if (!extractedText || extractedText.trim().length === 0) {
-      throw new Error('No text was extracted from the document');
+      throw new Error(`No text was extracted from the ${fileType} document`);
     }
 
-    console.log('Text extracted successfully, length:', extractedText.length);
+    console.log('Text extraction successful:', {
+      length: extractedText.length,
+      preview: extractedText.substring(0, 200),
+      containsNumbers: /\d/.test(extractedText),
+      containsLetters: /[a-zA-Z]/.test(extractedText)
+    });
 
     // First verify if it's a medical bill
     console.log('Verifying if document is a medical bill...');
@@ -45,43 +53,73 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     let structuredData = null;
     if (verificationResult.isMedicalBill) {
       // Then extract data if it is a medical bill
-      console.log('Document is a medical bill, extracting data...');
+      console.log('Document is a medical bill, extracting structured data...');
       structuredData = await processWithLLM(extractedText, false);
-      console.log('Data extraction complete');
+      console.log('Data extraction complete:', {
+        hasPatientInfo: !!structuredData?.patientInfo,
+        hasBillInfo: !!structuredData?.billInfo,
+        servicesCount: structuredData?.services?.length || 0
+      });
+    } else {
+      console.log('Document is not a medical bill. Reason:', verificationResult.reason);
     }
 
     // Update document in Firestore
     const docRef = adminDb.collection('bills').doc(billId);
-    await docRef.update({
+    const updateData = {
       extractedText,
       extractedData: structuredData,
       isMedicalBill: verificationResult.isMedicalBill,
       confidence: verificationResult.confidence,
       reason: verificationResult.reason,
       analyzedAt: new Date().toISOString(),
-      status: 'analyzed'
-    });
+      status: 'analyzed',
+      fileType,
+      textLength: extractedText.length,
+      processingDetails: {
+        ocrCompleted: true,
+        verificationCompleted: true,
+        dataExtractionCompleted: !!structuredData
+      }
+    };
+    
+    await docRef.update(updateData);
+    console.log('Firestore document updated successfully');
 
     return {
       success: true,
       ...structuredData,
       isMedicalBill: verificationResult.isMedicalBill,
       confidence: verificationResult.confidence,
-      reason: verificationResult.reason
+      reason: verificationResult.reason,
+      processingDetails: updateData.processingDetails
     };
 
   } catch (error) {
-    console.error('Analysis error:', error);
+    console.error('Analysis error:', {
+      step: error.step || 'unknown',
+      message: error.message,
+      fileType,
+      hasBuffer: !!fileBuffer,
+      hasExtractedText: !!extractedText,
+      textLength: extractedText?.length
+    });
     
-    // Update document status to failed
+    // Update document status to failed with detailed error info
     const docRef = adminDb.collection('bills').doc(billId);
     await docRef.update({
       status: 'failed',
       error: error.message,
+      errorDetails: {
+        step: error.step || 'unknown',
+        fileType,
+        hasExtractedText: !!extractedText,
+        textLength: extractedText?.length
+      },
       failedAt: new Date().toISOString()
     });
 
-    throw new Error(`Analysis failed: ${error.message}`);
+    throw new Error(`Analysis failed at step ${error.step || 'unknown'}: ${error.message}`);
   }
 };
 

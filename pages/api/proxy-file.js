@@ -77,7 +77,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
     }
     
-    // Get the file path from the query parameters
+    // Get the file path and authentication info from the query parameters
     const { path, userId, billId } = req.query;
     
     if (!path) {
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
         console.log('Document ownership verified');
       } catch (authError) {
         console.error('Error verifying document ownership:', authError);
-        // Continue anyway since we're using the direct file path
+        return res.status(500).json({ error: 'Error verifying document ownership' });
       }
     }
     
