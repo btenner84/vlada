@@ -766,22 +766,26 @@ export default function BillAnalysis() {
     }}>
       {/* Navigation Bar */}
       <nav style={{
-        padding: "1rem 2rem",
+        padding: isMobile ? "1rem" : "1rem 2rem",
         background: "#1E293B",
         borderBottom: "1px solid #334155",
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between"
+        justifyContent: "space-between",
+        flexWrap: isMobile ? "wrap" : "nowrap",
+        gap: isMobile ? "0.5rem" : "0"
       }}>
         <Link href="/dashboard" style={{
           color: "#E2E8F0",
           textDecoration: "none",
           display: "flex",
           alignItems: "center",
-          gap: "0.5rem"
+          gap: "0.5rem",
+          width: isMobile ? "100%" : "auto",
+          marginBottom: isMobile ? "0.5rem" : "0"
         }}>
           <span style={{
-            fontSize: "1.5rem",
+            fontSize: isMobile ? "1.2rem" : "1.5rem",
             fontWeight: "bold"
           }}>← Back to Dashboard</span>
         </Link>
@@ -794,7 +798,9 @@ export default function BillAnalysis() {
             color: "white",
             borderRadius: "0.5rem",
             fontSize: "0.875rem",
-            fontWeight: "500"
+            fontWeight: "500",
+            width: isMobile ? "100%" : "auto",
+            textAlign: isMobile ? "center" : "left"
           }}>
             {processingMethod === 'server' ? "Server Processed" : 
              processingMethod === 'client' ? "Client Processed" : "Fallback Data"}
@@ -806,13 +812,13 @@ export default function BillAnalysis() {
       <div style={{
         maxWidth: "1400px",
         margin: "2rem auto",
-        padding: "0 2rem"
+        padding: isMobile ? "0 1rem" : "0 2rem"
       }}>
         {/* Key Metrics Bar */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "1.5rem",
+          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "1rem",
           marginBottom: "2rem"
         }}>
           {/* Patient Name */}
@@ -908,18 +914,24 @@ export default function BillAnalysis() {
             }}>
               {/* Header with Document Link */}
               <div style={{
-                padding: "1.5rem",
+                padding: isMobile ? "1rem" : "1.5rem",
                 borderBottom: "1px solid #334155",
                 display: "flex",
                 justifyContent: "space-between",
-                alignItems: "center"
+                alignItems: "center",
+                flexDirection: isMobile ? "column" : "row",
+                gap: isMobile ? "1rem" : "0"
               }}>
                 <h2 style={{
-                  fontSize: "1.5rem",
+                  fontSize: isMobile ? "1.2rem" : "1.5rem",
                   fontWeight: "600",
                   display: "flex",
                   alignItems: "center",
-                  gap: "0.75rem"
+                  gap: "0.75rem",
+                  flexWrap: isMobile ? "wrap" : "nowrap",
+                  justifyContent: isMobile ? "center" : "flex-start",
+                  width: isMobile ? "100%" : "auto",
+                  textAlign: isMobile ? "center" : "left"
                 }}>
                   <span>AI Analysis Overview</span>
                   {isMedicalBill !== null && (
@@ -942,6 +954,7 @@ export default function BillAnalysis() {
                     style={{
                       display: "flex",
                       alignItems: "center",
+                      justifyContent: isMobile ? "center" : "flex-start",
                       gap: "0.5rem",
                       padding: "0.75rem 1.25rem",
                       background: "rgba(59, 130, 246, 0.1)",
@@ -951,7 +964,8 @@ export default function BillAnalysis() {
                       fontSize: "0.875rem",
                       fontWeight: "500",
                       transition: "all 0.2s",
-                      border: "1px solid rgba(59, 130, 246, 0.2)"
+                      border: "1px solid rgba(59, 130, 246, 0.2)",
+                      width: isMobile ? "100%" : "auto"
                     }}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -966,24 +980,27 @@ export default function BillAnalysis() {
 
               {/* AI Analysis Content */}
               <div style={{
-                padding: "2rem",
+                padding: isMobile ? "1rem" : "2rem",
                 display: "grid",
-                gap: "2rem"
+                gap: isMobile ? "1.5rem" : "2rem"
               }}>
                 {/* Ask AI Section */}
                 <div style={{
-                  padding: "1.5rem",
+                  padding: isMobile ? "1rem" : "1.5rem",
                   background: "#0F172A",
                   borderRadius: "0.75rem",
                   border: "1px solid #334155"
                 }}>
                   <h3 style={{
-                    fontSize: "1.25rem",
+                    fontSize: isMobile ? "1.1rem" : "1.25rem",
                     fontWeight: "600",
-                    marginBottom: "1.5rem",
+                    marginBottom: isMobile ? "1rem" : "1.5rem",
                     display: "flex",
                     alignItems: "center",
-                    gap: "0.5rem"
+                    gap: "0.5rem",
+                    flexWrap: isMobile ? "wrap" : "nowrap",
+                    justifyContent: isMobile ? "center" : "flex-start",
+                    textAlign: isMobile ? "center" : "left"
                   }}>
                     <span>Ask AI About Your Bill</span>
                     <span style={{
@@ -1003,7 +1020,9 @@ export default function BillAnalysis() {
                   }}>
                     <div style={{
                       display: "flex",
-                      gap: "0.5rem"
+                      gap: "0.5rem",
+                      flexDirection: isMobile ? "column" : "row",
+                      width: "100%"
                     }}>
                       <input
                         type="text"
@@ -1017,7 +1036,8 @@ export default function BillAnalysis() {
                           border: "1px solid #334155",
                           borderRadius: "0.5rem",
                           color: "#E2E8F0",
-                          fontSize: "0.875rem"
+                          fontSize: "0.875rem",
+                          width: isMobile ? "100%" : "auto"
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
@@ -1037,7 +1057,8 @@ export default function BillAnalysis() {
                           color: "white",
                           fontWeight: "500",
                           cursor: isAskingQuestion || !billQuestion.trim() ? "not-allowed" : "pointer",
-                          opacity: isAskingQuestion || !billQuestion.trim() ? 0.7 : 1
+                          opacity: isAskingQuestion || !billQuestion.trim() ? 0.7 : 1,
+                          width: isMobile ? "100%" : "auto"
                         }}
                       >
                         {isAskingQuestion ? "Thinking..." : "Ask"}
@@ -1062,15 +1083,16 @@ export default function BillAnalysis() {
 
                 {/* Key Findings */}
                 <div style={{
-                  padding: "1.5rem",
+                  padding: isMobile ? "1rem" : "1.5rem",
                   background: "#0F172A",
                   borderRadius: "0.75rem",
                   border: "1px solid #334155"
                 }}>
                   <h3 style={{
-                    fontSize: "1.125rem",
+                    fontSize: isMobile ? "1.1rem" : "1.125rem",
                     fontWeight: "600",
-                    marginBottom: "1rem"
+                    marginBottom: "1rem",
+                    textAlign: isMobile ? "center" : "left"
                   }}>Key Findings</h3>
                   <div style={{
                     display: "grid",
@@ -1083,7 +1105,8 @@ export default function BillAnalysis() {
                       padding: "0.75rem",
                       background: "rgba(16, 185, 129, 0.1)",
                       borderRadius: "0.5rem",
-                      border: "1px solid rgba(16, 185, 129, 0.2)"
+                      border: "1px solid rgba(16, 185, 129, 0.2)",
+                      justifyContent: isMobile ? "center" : "flex-start"
                     }}>
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
@@ -1099,10 +1122,20 @@ export default function BillAnalysis() {
                         padding: "0.75rem",
                         background: "rgba(59, 130, 246, 0.1)",
                         borderRadius: "0.5rem",
-                        border: "1px solid rgba(59, 130, 246, 0.2)"
+                        border: "1px solid rgba(59, 130, 246, 0.2)",
+                        flexDirection: isMobile ? "column" : "row",
+                        gap: isMobile ? "0.5rem" : "0"
                       }}>
-                        <span style={{ color: "#3B82F6" }}>{service.description}</span>
-                        <span style={{ color: "#3B82F6", fontWeight: "600" }}>{service.amount}</span>
+                        <span style={{ 
+                          color: "#3B82F6",
+                          textAlign: isMobile ? "center" : "left",
+                          marginBottom: isMobile ? "0.25rem" : "0"
+                        }}>{service.description}</span>
+                        <span style={{ 
+                          color: "#3B82F6", 
+                          fontWeight: "600",
+                          textAlign: isMobile ? "center" : "right"
+                        }}>{service.amount}</span>
                       </div>
                     ))}
                   </div>
@@ -1110,16 +1143,18 @@ export default function BillAnalysis() {
 
                 {/* Processing Details */}
                 <div style={{
-                  padding: "1.5rem",
+                  padding: isMobile ? "1rem" : "1.5rem",
                   background: "#0F172A",
                   borderRadius: "0.75rem",
                   border: "1px solid #334155"
                 }}>
                   <h3 style={{
-                    fontSize: "1.125rem",
+                    fontSize: isMobile ? "1.1rem" : "1.125rem",
                     fontWeight: "600",
-                    marginBottom: "1rem"
+                    marginBottom: "1rem",
+                    textAlign: isMobile ? "center" : "left"
                   }}>Processing Details</h3>
+                  
                   <div style={{
                     display: "grid",
                     gap: "0.75rem",
@@ -1128,29 +1163,61 @@ export default function BillAnalysis() {
                     <div style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      padding: "0.5rem 0",
-                      borderBottom: "1px solid #334155"
+                      alignItems: "center",
+                      padding: "0.75rem",
+                      background: "#1E293B",
+                      borderRadius: "0.5rem",
+                      flexDirection: isMobile ? "column" : "row",
+                      gap: isMobile ? "0.5rem" : "0",
+                      textAlign: isMobile ? "center" : "left"
                     }}>
-                      <span style={{ color: "#94A3B8" }}>Processing Method</span>
-                      <span>{processingMethod || 'Not processed'}</span>
+                      <span>Method</span>
+                      <span style={{
+                        padding: "0.25rem 0.75rem",
+                        background: processingMethod === 'server' ? "#059669" : 
+                                   processingMethod === 'client' ? "#F59E0B" : "#6B7280",
+                        color: "white",
+                        borderRadius: "1rem",
+                        fontSize: "0.75rem",
+                        fontWeight: "500"
+                      }}>
+                        {processingMethod === 'server' ? "Server-Side OCR" : 
+                         processingMethod === 'client' ? "Client-Side OCR" : "Fallback Data"}
+                      </span>
                     </div>
+                    
                     <div style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      padding: "0.5rem 0",
-                      borderBottom: "1px solid #334155"
+                      alignItems: "center",
+                      padding: "0.75rem",
+                      background: "#1E293B",
+                      borderRadius: "0.5rem",
+                      flexDirection: isMobile ? "column" : "row",
+                      gap: isMobile ? "0.5rem" : "0",
+                      textAlign: isMobile ? "center" : "left"
                     }}>
-                      <span style={{ color: "#94A3B8" }}>Analysis Date</span>
-                      <span>{new Date().toLocaleDateString()}</span>
+                      <span>Analyzed At</span>
+                      <span>
+                        {analysisVersion?.analyzedAt?.toDate?.().toLocaleString() || 'N/A'}
+                      </span>
                     </div>
+                    
                     <div style={{
                       display: "flex",
                       justifyContent: "space-between",
-                      padding: "0.5rem 0",
-                      borderBottom: "1px solid #334155"
+                      alignItems: "center",
+                      padding: "0.75rem",
+                      background: "#1E293B",
+                      borderRadius: "0.5rem",
+                      flexDirection: isMobile ? "column" : "row",
+                      gap: isMobile ? "0.5rem" : "0",
+                      textAlign: isMobile ? "center" : "left"
                     }}>
-                      <span style={{ color: "#94A3B8" }}>Document Type</span>
-                      <span>{billData?.fileType || 'Unknown'}</span>
+                      <span>Version</span>
+                      <span>
+                        {analysisVersion?.version || '1.0'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1228,93 +1295,107 @@ export default function BillAnalysis() {
             </div>
           </div>
 
-          {/* Right Column - Patient Info & Actions */}
+          {/* Right Column - Additional Details */}
           <div style={{
             display: "flex",
             flexDirection: "column",
-            gap: "2rem"
+            gap: isMobile ? "1.5rem" : "2rem"
           }}>
             {/* Actions */}
             <div style={{
+              padding: isMobile ? "1rem" : "1.5rem",
               background: "#1E293B",
               borderRadius: "0.75rem",
-              padding: "2rem",
               border: "1px solid #334155"
             }}>
-              <h2 style={{
-                fontSize: "1.5rem",
+              <h3 style={{
+                fontSize: isMobile ? "1.1rem" : "1.25rem",
                 fontWeight: "600",
-                marginBottom: "1.5rem",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center"
-              }}>
-                <span>Actions</span>
-                {analysisVersion && (
-                  <span style={{
-                    fontSize: "0.875rem",
-                    color: "#94A3B8",
-                    fontWeight: "normal"
-                  }}>
-                    Version {analysisVersion.version}
-                  </span>
-                )}
-              </h2>
+                marginBottom: "1rem",
+                textAlign: isMobile ? "center" : "left"
+              }}>Actions</h3>
               
-              <div style={{ display: "grid", gap: "1rem" }}>
-                <button style={{
-                  padding: "1rem",
-                  background: "#3B82F6",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "0.5rem",
-                  fontWeight: "500",
-                  cursor: "pointer"
-                }}>
-                  Generate Dispute Letter
-                </button>
-                <button style={{
-                  padding: "1rem",
-                  background: "#10B981",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "0.5rem",
-                  fontWeight: "500",
-                  cursor: "pointer"
-                }}>
-                  Download Analysis Report
-                </button>
-                <button style={{
-                  padding: "1rem",
-                  background: "#6B7280",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "0.5rem",
-                  fontWeight: "500",
-                  cursor: "pointer"
-                }}>
-                  Share Analysis
-                </button>
-                <button 
-                  onClick={deleteAnalysis}
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.75rem"
+              }}>
+                {billData?.fileUrl && (
+                  <a
+                    href={billData.fileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: "0.75rem",
+                      background: "rgba(59, 130, 246, 0.1)",
+                      color: "#3B82F6",
+                      borderRadius: "0.5rem",
+                      textDecoration: "none",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      fontWeight: "500",
+                      border: "1px solid rgba(59, 130, 246, 0.2)",
+                      justifyContent: isMobile ? "center" : "flex-start",
+                      textAlign: isMobile ? "center" : "left"
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Download Original Document
+                  </a>
+                )}
+                
+                <button
+                  onClick={() => window.print()}
                   style={{
-                    padding: "1rem",
-                    background: "#DC2626",
-                    color: "white",
-                    border: "none",
+                    padding: "0.75rem",
+                    background: "rgba(75, 85, 99, 0.1)",
+                    color: "#94A3B8",
                     borderRadius: "0.5rem",
-                    fontWeight: "500",
-                    cursor: "pointer",
+                    border: "1px solid rgba(75, 85, 99, 0.2)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    gap: "0.5rem"
+                    gap: "0.5rem",
+                    fontWeight: "500",
+                    cursor: "pointer",
+                    justifyContent: isMobile ? "center" : "flex-start",
+                    textAlign: isMobile ? "center" : "left"
                   }}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 6h18"/>
-                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                    <polyline points="6 9 6 2 18 2 18 9"/>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                    <rect x="6" y="14" width="12" height="8"/>
+                  </svg>
+                  Print Analysis
+                </button>
+                
+                <button
+                  onClick={deleteAnalysis}
+                  style={{
+                    padding: "0.75rem",
+                    background: "rgba(239, 68, 68, 0.1)",
+                    color: "#EF4444",
+                    borderRadius: "0.5rem",
+                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    fontWeight: "500",
+                    cursor: "pointer",
+                    justifyContent: isMobile ? "center" : "flex-start",
+                    textAlign: isMobile ? "center" : "left"
+                  }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    <line x1="10" y1="11" x2="10" y2="17"/>
+                    <line x1="14" y1="11" x2="14" y2="17"/>
                   </svg>
                   Delete Analysis
                 </button>
