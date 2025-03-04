@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import { auth } from '../../firebase';
+import { auth, db, storage } from '../../firebase';
 import { theme } from '../../styles/theme';
 import Link from 'next/link';
-import { doc, getDoc, updateDoc, serverTimestamp, deleteDoc, collection, getDocs, setDoc } from 'firebase/firestore';
-import { db } from '../../firebase';
-import { getFirestore } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, deleteDoc, collection, getDocs, setDoc, arrayUnion, addDoc, query, where, orderBy, limit } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
+import { analyzeWithOpenAI, askQuestionWithOpenAI } from '../../services/openaiService';
 
 const LoadingScreen = ({ progress }) => {
   return (
@@ -384,12 +384,12 @@ export default function BillAnalysis() {
         return;
         
       } catch (serverError) {
-        console.log('Server-side processing failed, trying client-side processing:', serverError);
+        console.log('Server-side processing failed, trying client-side processing with OpenAI:', serverError);
         
-        // Fall back to client-side processing
+        // Fall back to client-side processing with OpenAI
         try {
-          console.log('Starting client-side document processing');
-          setProcessingMethod('client');
+          console.log('Starting client-side document processing with OpenAI integration');
+          setProcessingMethod('client-openai');
           
           // Process the document client-side with progress handler
           const result = await analyzeDocumentClient(billData.fileUrl, handleOcrProgress);
@@ -401,10 +401,11 @@ export default function BillAnalysis() {
             console.log('Client-side processing successful');
             console.log('Raw data text updated, length:', result.extractedText.length);
             console.log('First 200 chars of extracted text:', result.extractedText.substring(0, 200));
+            console.log('Processing method:', result.processingMethod || 'client');
             
             setRawData({
               extractedText: result.extractedText,
-              source: 'client'
+              source: result.processingMethod || 'client'
             });
             
             setExtractedData(result);
@@ -423,7 +424,7 @@ export default function BillAnalysis() {
               extractedText: result.extractedText,
               isMedicalBill: result.isMedicalBill,
               confidence: result.confidence,
-              processingMethod: 'client',
+              processingMethod: result.processingMethod || 'client',
               userId: currentUser.uid,
               version: versionNumber
             });
@@ -612,25 +613,38 @@ export default function BillAnalysis() {
         rawText: extractedData?.rawText || '',
       };
 
-      const response = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          text: billQuestion,
-          context: JSON.stringify(contextData),
-          mode: 'qa'
-        }),
-      });
+      // Use our new OpenAI service
+      console.log('Asking question with OpenAI service:', billQuestion);
+      const data = await askQuestionWithOpenAI(billQuestion, contextData);
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to get answer');
+      if (data.error) {
+        throw new Error(data.error || 'Failed to get answer');
       }
       
-      const data = await response.json();
       setBillAnswer(data.summary);
+      
+      // Log the successful question and answer
+      console.log('Question answered successfully:', {
+        question: billQuestion,
+        answer: data.summary.substring(0, 100) + '...'
+      });
+      
+      // Optionally save the Q&A to Firestore
+      if (billId && user) {
+        try {
+          const qaRef = collection(db, 'bills', billId, 'questions');
+          await addDoc(qaRef, {
+            question: billQuestion,
+            answer: data.summary,
+            timestamp: serverTimestamp(),
+            userId: user.uid
+          });
+          console.log('Q&A saved to Firestore');
+        } catch (saveError) {
+          console.error('Failed to save Q&A to Firestore:', saveError);
+          // Non-critical error, don't throw
+        }
+      }
     } catch (error) {
       console.error('Failed to get answer:', error);
       setBillAnswer('I apologize, but I encountered an error while processing your question. Please try rephrasing your question or ask something else about the bill.');

@@ -1,8 +1,25 @@
 import { createWorker } from 'tesseract.js';
 import OpenAI from 'openai';
+import { analyzeWithOpenAI } from '../services/openaiService';
 
 // Client-side worker management
 let clientWorker = null;
+
+// Add a flag to track if we're using OpenAI API or client-side processing
+let isUsingOpenAI = false;
+
+// Add a function to check if we can use OpenAI API
+export function canUseOpenAI() {
+  return typeof window !== 'undefined' && 
+         window.location && 
+         window.location.origin && 
+         !isUsingOpenAI; // Prevent recursive calls
+}
+
+// Add a function to set the OpenAI usage flag
+export function setUsingOpenAI(value) {
+  isUsingOpenAI = value;
+}
 
 export async function getClientWorker(progressHandler = null) {
   if (!clientWorker) {
@@ -65,9 +82,40 @@ export async function extractTextFromImageClient(imageUrl, progressHandler = nul
     const imageBlob = await response.blob();
     console.log('Image fetched successfully, size:', imageBlob.size, 'bytes');
     
-    // Recognize text in the image
+    // Convert the blob to a data URL
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(imageBlob);
+    });
+    
+    console.log('Image converted to data URL, length:', dataUrl.length);
+    
+    // Create an image element to ensure the image is valid
+    const img = new Image();
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = dataUrl;
+    });
+    
+    console.log('Image loaded successfully, dimensions:', img.width, 'x', img.height);
+    
+    // Create a canvas to convert the image to a format Tesseract can handle
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    
+    // Get the canvas data as PNG (a format Tesseract handles well)
+    const pngDataUrl = canvas.toDataURL('image/png');
+    console.log('Image converted to PNG data URL, length:', pngDataUrl.length);
+    
+    // Recognize text in the image using the PNG data URL
     console.log('Starting OCR recognition...');
-    const result = await worker.recognize(imageBlob);
+    const result = await worker.recognize(pngDataUrl);
     console.log('OCR recognition completed');
     
     // Extract the text
@@ -355,6 +403,61 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
     console.log('Starting client-side LLM processing with text length:', text.length);
     console.log('Mode:', isVerificationMode ? 'Verification' : 'Data Extraction');
     
+    // Try to use OpenAI API first if available
+    if (canUseOpenAI()) {
+      try {
+        console.log('Attempting to use OpenAI API for processing...');
+        setUsingOpenAI(true); // Set flag to prevent recursive calls
+        
+        // Call the OpenAI API
+        const result = await analyzeWithOpenAI(text, {
+          mode: isVerificationMode ? 'verify' : 'extract'
+        });
+        
+        if (result.error) {
+          console.warn('OpenAI API returned an error:', result.error);
+          throw new Error(result.error);
+        }
+        
+        console.log('Successfully processed with OpenAI API');
+        setUsingOpenAI(false); // Reset flag
+        
+        // If we're in verification mode, ensure the result has the expected format
+        if (isVerificationMode) {
+          if (typeof result.isMedicalBill !== 'boolean') {
+            console.warn('OpenAI API response missing isMedicalBill boolean, falling back to client-side processing');
+            throw new Error('Invalid API response format');
+          }
+          return {
+            isMedicalBill: result.isMedicalBill,
+            confidence: result.confidence || 'medium',
+            reason: result.reason || 'Processed with OpenAI API',
+            processingMethod: 'openai'
+          };
+        }
+        
+        // For data extraction, ensure we have the expected structure
+        if (!result.patientInfo && !result.billInfo) {
+          console.warn('OpenAI API response missing required fields, falling back to client-side processing');
+          throw new Error('Invalid API response format');
+        }
+        
+        // Add the extracted text and processing metadata to the result
+        result.extractedText = text;
+        result.processingMethod = 'openai';
+        result.processingTimestamp = new Date().toISOString();
+        
+        return result;
+      } catch (apiError) {
+        console.warn('OpenAI API processing failed, falling back to client-side processing:', apiError);
+        setUsingOpenAI(false); // Reset flag
+        // Continue with client-side processing
+      }
+    } else {
+      console.log('OpenAI API not available or already in use, using client-side processing');
+    }
+    
+    // Original client-side processing logic
     if (isVerificationMode) {
       // Enhanced heuristic to check if it's a medical bill
       const medicalTerms = [
@@ -475,9 +578,14 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
       defaultData.patientInfo.insuranceInfo = insuranceMatch[1].trim();
     }
     
+    // Add processing metadata
+    defaultData.processingMethod = 'client';
+    defaultData.processingTimestamp = new Date().toISOString();
+    
     return defaultData;
   } catch (error) {
     console.error('Client-side LLM processing error:', error);
+    setUsingOpenAI(false); // Reset flag in case of error
     // Return a valid structure even on error
     return {
       patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
@@ -486,7 +594,9 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
       insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" },
       isMedicalBill: false,
       confidence: "error",
-      extractedText: "Error processing document"
+      extractedText: "Error processing document",
+      processingMethod: 'error',
+      error: error.message
     };
   }
 }
@@ -516,17 +626,42 @@ export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
     }
     
     // Process the extracted text with the LLM
-    console.log('Processing extracted text with client-side LLM...');
+    console.log('Processing extracted text with LLM...');
     console.log('Extracted text length:', extractedText.length);
     console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
     
-    const result = await processWithClientLLM(extractedText);
+    // First verify if it's a medical bill
+    console.log('Verifying if document is a medical bill...');
+    const verificationResult = await processWithClientLLM(extractedText, true);
     
-    // Add the extracted text to the result
-    result.extractedText = extractedText;
+    if (!verificationResult.isMedicalBill) {
+      console.warn('Document does not appear to be a medical bill:', verificationResult.reason);
+      // Still proceed with extraction but log the warning
+    }
     
-    console.log('Client-side analysis complete:', { 
+    // Process the extracted text for data extraction
+    console.log('Extracting data from document...');
+    const result = await processWithClientLLM(extractedText, false);
+    
+    // Add verification results to the extraction result
+    result.isMedicalBill = verificationResult.isMedicalBill;
+    result.confidence = verificationResult.confidence;
+    result.verificationReason = verificationResult.reason;
+    
+    // Add the extracted text to the result if not already present
+    if (!result.extractedText) {
+      result.extractedText = extractedText;
+    }
+    
+    // Add processing metadata
+    result.fileType = fileType;
+    result.processingTimestamp = new Date().toISOString();
+    
+    console.log('Document analysis complete:', { 
       textLength: extractedText.length,
+      isMedicalBill: result.isMedicalBill,
+      confidence: result.confidence,
+      processingMethod: result.processingMethod || 'client',
       resultSummary: {
         hasPatientInfo: !!result.patientInfo,
         hasBillInfo: !!result.billInfo,
@@ -537,7 +672,20 @@ export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
     
     return result;
   } catch (error) {
-    console.error('Client-side analysis error:', error);
-    throw new Error(`Client-side analysis failed: ${error.message}`);
+    console.error('Document analysis error:', error);
+    
+    // Return a valid structure even on error
+    return {
+      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
+      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
+      services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
+      insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" },
+      isMedicalBill: false,
+      confidence: "error",
+      extractedText: "Error processing document: " + error.message,
+      processingMethod: 'error',
+      error: error.message,
+      processingTimestamp: new Date().toISOString()
+    };
   }
 } 
