@@ -102,6 +102,17 @@ export default function BillAnalysis() {
   const [billAnswer, setBillAnswer] = useState('');
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
 
+  // Helper function to clean up patient names
+  const cleanPatientName = (name) => {
+    if (!name) return 'Not found';
+    
+    // Remove any text after common separators that might indicate it's not part of the name
+    const cleanName = name.split(/\s+(?:number|dob|date|account|id|#|paflent)/i)[0].trim();
+    
+    // Limit length to avoid capturing too much text
+    return cleanName.length > 30 ? cleanName.substring(0, 30) : cleanName;
+  };
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
@@ -381,6 +392,12 @@ export default function BillAnalysis() {
           extractedText: data.extractedText
         });
         setOcrProgress(null);
+
+        // Clean up the patient name
+        if (data.patientInfo && data.patientInfo.fullName) {
+          data.patientInfo.fullName = cleanPatientName(data.patientInfo.fullName);
+        }
+        
         return;
         
       } catch (serverError) {
@@ -402,6 +419,11 @@ export default function BillAnalysis() {
             console.log('Raw data text updated, length:', result.extractedText.length);
             console.log('First 200 chars of extracted text:', result.extractedText.substring(0, 200));
             console.log('Processing method:', result.processingMethod || 'client');
+            
+            // Clean up the patient name
+            if (result.patientInfo && result.patientInfo.fullName) {
+              result.patientInfo.fullName = cleanPatientName(result.patientInfo.fullName);
+            }
             
             setRawData({
               extractedText: result.extractedText,
@@ -790,36 +812,19 @@ export default function BillAnalysis() {
         gap: isMobile ? "0.5rem" : "0"
       }}>
         <Link href="/dashboard" style={{
-          color: "#E2E8F0",
-          textDecoration: "none",
           display: "flex",
           alignItems: "center",
           gap: "0.5rem",
-          width: isMobile ? "100%" : "auto",
-          marginBottom: isMobile ? "0.5rem" : "0"
+          color: theme.colors.textPrimary,
+          textDecoration: "none",
+          transition: "color 0.2s",
+          fontSize: isMobile ? "1rem" : "1.25rem"
         }}>
           <span style={{
             fontSize: isMobile ? "1.2rem" : "1.5rem",
             fontWeight: "bold"
           }}>← Back to Dashboard</span>
         </Link>
-        
-        {processingMethod && (
-          <div style={{
-            padding: "0.5rem 1rem",
-            background: processingMethod === 'server' ? "#10B981" : 
-                       processingMethod === 'client' ? "#F59E0B" : "#6B7280",
-            color: "white",
-            borderRadius: "0.5rem",
-            fontSize: "0.875rem",
-            fontWeight: "500",
-            width: isMobile ? "100%" : "auto",
-            textAlign: isMobile ? "center" : "left"
-          }}>
-            {processingMethod === 'server' ? "Server Processed" : 
-             processingMethod === 'client' ? "Client Processed" : "Fallback Data"}
-          </div>
-        )}
       </nav>
 
       {/* Main Content */}
@@ -850,7 +855,9 @@ export default function BillAnalysis() {
               fontSize: "1.5rem", 
               fontWeight: "600"
             }}>
-              {extractedData?.patientInfo?.fullName || user?.displayName || 'Not found'}
+              {extractedData?.patientInfo?.fullName ? 
+                cleanPatientName(extractedData.patientInfo.fullName) : 
+                (user?.displayName || 'Not found')}
             </div>
           </div>
 
@@ -1523,7 +1530,7 @@ export default function BillAnalysis() {
           }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11-8-11-8z"/>
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
           View Raw OCR Text

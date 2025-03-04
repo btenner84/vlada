@@ -529,9 +529,28 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
     
     // Always try to extract information, regardless of medical bill detection
     // Extract patient information
-    const patientNameMatch = text.match(/(?:patient|name)[\s:]+([A-Za-z\s.,'-]+)(?:\r|\n|,|;|$)/i);
+    const patientNameMatch = text.match(/(?:patient|name)[\s:]+([A-Za-z\s.,'-]+?)(?:\s+(?:number|dob|date|account|id|#|\r|\n|,|;|$))/i);
     if (patientNameMatch) {
       defaultData.patientInfo.fullName = patientNameMatch[1].trim();
+    } else {
+      // Try a more general approach if the specific pattern doesn't match
+      const nameLines = text.split('\n').filter(line => 
+        line.toLowerCase().includes('patient') || 
+        line.toLowerCase().includes('name')
+      );
+      
+      if (nameLines.length > 0) {
+        // Take the first line that contains patient or name
+        const nameLine = nameLines[0];
+        // Extract just the name part after "patient:" or "name:"
+        const simplifiedMatch = nameLine.match(/(?:patient|name)[\s:]+([A-Za-z\s.,'-]+)/i);
+        if (simplifiedMatch) {
+          // Limit to just the first 30 characters to avoid capturing too much
+          const fullName = simplifiedMatch[1].trim();
+          defaultData.patientInfo.fullName = fullName.length > 30 ? 
+            fullName.substring(0, 30) : fullName;
+        }
+      }
     }
     
     // Extract amount - look for any currency amounts

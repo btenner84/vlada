@@ -17,6 +17,19 @@ export async function analyzeWithOpenAI(text, options = {}) {
     // Get the API URL from environment variables or use default
     const apiUrl = process.env.NEXT_PUBLIC_OPENAI_API_URL || '/api/analyze';
     
+    // Add specific instructions for patient name extraction
+    const enhancedOptions = {
+      ...options,
+      instructions: `
+        When extracting patient information, please follow these guidelines:
+        1. For patient name, extract ONLY the actual name without any additional text like "Patient Number" or "Dates of Service"
+        2. If multiple potential names are found, choose the one most likely to be the patient name
+        3. Ensure the extracted name is clean and properly formatted
+        4. For dates, try to identify which is the service date and which is the due date
+        5. For amounts, identify the total billed amount accurately
+      `
+    };
+    
     // Prepare the request
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -26,7 +39,7 @@ export async function analyzeWithOpenAI(text, options = {}) {
       body: JSON.stringify({ 
         text,
         mode: options.mode || 'extract',
-        ...options
+        ...enhancedOptions
       }),
     });
     
@@ -38,6 +51,15 @@ export async function analyzeWithOpenAI(text, options = {}) {
     
     const data = await response.json();
     console.log('OpenAI analysis successful');
+    
+    // Post-process the data to ensure clean patient name
+    if (data.patientInfo && data.patientInfo.fullName) {
+      // Remove any text after common separators that might indicate it's not part of the name
+      const cleanName = data.patientInfo.fullName.split(/\s+(?:number|dob|date|account|id|#)/i)[0].trim();
+      // Limit length to avoid capturing too much text
+      data.patientInfo.fullName = cleanName.length > 30 ? cleanName.substring(0, 30) : cleanName;
+    }
+    
     return data;
   } catch (error) {
     console.error('Error in OpenAI analysis:', error);
