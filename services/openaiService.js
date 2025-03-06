@@ -17,18 +17,59 @@ export async function analyzeWithOpenAI(text, options = {}) {
     // Get the API URL from environment variables or use default
     const apiUrl = process.env.NEXT_PUBLIC_OPENAI_API_URL || '/api/analyze';
     
-    // Add specific instructions for patient name extraction
-    const enhancedOptions = {
-      ...options,
-      instructions: `
-        When extracting patient information, please follow these guidelines:
-        1. For patient name, extract ONLY the actual name without any additional text like "Patient Number" or "Dates of Service"
-        2. If multiple potential names are found, choose the one most likely to be the patient name
-        3. Ensure the extracted name is clean and properly formatted
-        4. For dates, try to identify which is the service date and which is the due date
-        5. For amounts, identify the total billed amount accurately
-      `
-    };
+    // Define comprehensive extraction instructions
+    let extractionInstructions = `
+      When extracting medical bill information, please follow these guidelines:
+      
+      1. PATIENT NAME EXTRACTION:
+         - Extract ONLY the actual name without any additional text
+         - Common patterns include "Patient: [NAME]" or "Name: [NAME]"
+         - Ignore any additional patient identifiers, dates, or numbers 
+         - Example: From "Patient: JOHN DOE MRN: 12345", extract only "JOHN DOE"
+      
+      2. AMOUNT EXTRACTION:
+         - Identify the final amount due from the patient
+         - Look for terms like "Total Due", "Amount Due", "Patient Responsibility"
+         - Include the currency symbol and decimal points exactly as shown
+         - Distinguish between insurance-covered amounts and patient responsibility
+      
+      3. DATE EXTRACTION:
+         - Correctly identify service dates vs. billing dates vs. due dates
+         - Maintain the date format as shown in the document (MM/DD/YYYY)
+         - If a date range is shown for services, capture the full range
+      
+      4. SERVICE DETAILS:
+         - Extract each individual service, not just summary information
+         - Include service codes (CPT/HCPCS) when available
+         - Match amounts to the correct services
+         - Identify diagnostic codes (ICD-10) when present
+      
+      5. QUALITY VERIFICATION:
+         - Verify that extracted data appears in the original text
+         - Use "Not found" for truly missing information
+         - Be particularly careful with numeric data and codes
+    `;
+    
+    // Add learning from previous results if available
+    if (options.previousResults) {
+      extractionInstructions += `\n\n${options.enhancedInstructions || ''}`;
+    }
+    
+    // Add specific domain knowledge for common medical bill formats
+    extractionInstructions += `
+      
+      COMMON MEDICAL BILL FORMATS:
+      - Hospital bills typically include DRG (Diagnosis Related Group) codes
+      - Physician bills use CPT (Current Procedural Terminology) codes
+      - Lab bills often use unique LOINC or CPT codes in the 80000-89999 range
+      - Durable medical equipment bills use HCPCS codes starting with letters
+      
+      EXTRACTION QUALITY INDICATORS:
+      - Patient name should be a real human name without additional text
+      - Service codes should match established formats (5 digits for CPT, letter+4 digits for HCPCS)
+      - Amounts should include decimal points and follow currency format
+      - Dates should be in valid date formats
+    `;
     
     // Prepare the request
     const response = await fetch(apiUrl, {
@@ -39,7 +80,8 @@ export async function analyzeWithOpenAI(text, options = {}) {
       body: JSON.stringify({ 
         text,
         mode: options.mode || 'extract',
-        ...enhancedOptions
+        instructions: extractionInstructions,
+        previousResults: options.previousResults,
       }),
     });
     
@@ -59,6 +101,15 @@ export async function analyzeWithOpenAI(text, options = {}) {
       // Limit length to avoid capturing too much text
       data.patientInfo.fullName = cleanName.length > 30 ? cleanName.substring(0, 30) : cleanName;
     }
+    
+    // Add metadata about the analysis process
+    data.analysisMetadata = {
+      timestamp: new Date().toISOString(),
+      modelVersion: 'OpenAI GPT-3.5 Turbo',
+      textLength: text.length,
+      extractionMode: options.mode || 'extract',
+      usedPreviousResults: !!options.previousResults
+    };
     
     return data;
   } catch (error) {

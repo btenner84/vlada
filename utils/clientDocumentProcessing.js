@@ -1,6 +1,7 @@
 import { createWorker } from 'tesseract.js';
 import OpenAI from 'openai';
 import { analyzeWithOpenAI } from '../services/openaiService';
+import { extractNumericalDataFromText } from './analyzedDataProcessor';
 
 // Client-side worker management
 let clientWorker = null;
@@ -398,10 +399,23 @@ function convertToProxyUrl(fileUrl) {
   }
 }
 
-export async function processWithClientLLM(text, isVerificationMode = false) {
+export async function processWithClientLLM(text, isVerificationMode = false, previousResults = null) {
   try {
     console.log('Starting client-side LLM processing with text length:', text.length);
     console.log('Mode:', isVerificationMode ? 'Verification' : 'Data Extraction');
+    
+    // Include learning from previous results if available
+    let enhancedInstructions = '';
+    if (previousResults && !isVerificationMode) {
+      enhancedInstructions = `
+        PREVIOUS ANALYSIS FEEDBACK:
+        This bill has been processed before. Here are insights from previous analyses that should guide your extraction:
+        - Patient Name: ${previousResults.patientInfo?.fullName || 'Not previously identified correctly'}
+        - Potential issues with previous extractions: ${previousResults.processingErrors || 'None noted'}
+        
+        NOTE: If previous data conflicts with what you observe in the document, trust your current analysis but explain the discrepancy.
+      `;
+    }
     
     // Try to use OpenAI API first if available
     if (canUseOpenAI()) {
@@ -409,9 +423,11 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
         console.log('Attempting to use OpenAI API for processing...');
         setUsingOpenAI(true); // Set flag to prevent recursive calls
         
-        // Call the OpenAI API
+        // Call the OpenAI API with enhanced instructions
         const result = await analyzeWithOpenAI(text, {
-          mode: isVerificationMode ? 'verify' : 'extract'
+          mode: isVerificationMode ? 'verify' : 'extract',
+          previousResults: previousResults,
+          enhancedInstructions: enhancedInstructions
         });
         
         if (result.error) {
@@ -436,18 +452,29 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
           };
         }
         
-        // For data extraction, ensure we have the expected structure
+        // For data extraction, add validation and cleaning logic
         if (!result.patientInfo && !result.billInfo) {
           console.warn('OpenAI API response missing required fields, falling back to client-side processing');
           throw new Error('Invalid API response format');
         }
         
-        // Add the extracted text and processing metadata to the result
-        result.extractedText = text;
-        result.processingMethod = 'openai';
-        result.processingTimestamp = new Date().toISOString();
+        // Apply post-processing and validation
+        const processedResult = validateAndCleanExtractedData(result, text);
         
-        return result;
+        // Add the extracted text and processing metadata to the result
+        processedResult.extractedText = text;
+        processedResult.processingMethod = 'openai';
+        processedResult.processingTimestamp = new Date().toISOString();
+        
+        // Add confidence metrics to the result
+        processedResult.dataQualityMetrics = {
+          patientInfoConfidence: calculateConfidenceScore(processedResult.patientInfo),
+          billInfoConfidence: calculateConfidenceScore(processedResult.billInfo),
+          servicesConfidence: Array.isArray(processedResult.services) ? 
+            processedResult.services.map(service => calculateConfidenceScore(service)) : []
+        };
+        
+        return processedResult;
       } catch (apiError) {
         console.warn('OpenAI API processing failed, falling back to client-side processing:', apiError);
         setUsingOpenAI(false); // Reset flag
@@ -523,7 +550,7 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
     const lowercaseText = text.toLowerCase();
     
     // Check if it's a medical bill (but don't gate extraction on this)
-    const verificationResult = await processWithClientLLM(text, true);
+    const verificationResult = await processWithClientLLM(text, true, defaultData);
     defaultData.isMedicalBill = verificationResult.isMedicalBill;
     defaultData.confidence = verificationResult.confidence;
     
@@ -620,91 +647,360 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
   }
 }
 
+/**
+ * Validates and cleans extracted data to ensure quality and consistency
+ * @param {Object} data - The extracted data from OCR and OpenAI
+ * @param {string} rawText - The raw OCR text for verification
+ * @returns {Object} - Cleaned and validated data
+ */
+function validateAndCleanExtractedData(data, rawText) {
+  // Create a deep copy to avoid modifying the original
+  const cleanedData = JSON.parse(JSON.stringify(data));
+  
+  // Add numerical data extraction if not present
+  if (!cleanedData.numericalData) {
+    cleanedData.numericalData = extractAllNumericalData(rawText);
+    console.log('Added numerical data extraction with', 
+      cleanedData.numericalData.allAmounts.length, 'amounts and',
+      cleanedData.numericalData.allDates.length, 'dates');
+  }
+  
+  // Clean patient name - remove any text after indicators that aren't part of names
+  if (cleanedData.patientInfo?.fullName && cleanedData.patientInfo.fullName !== "Not found") {
+    cleanedData.patientInfo.fullName = cleanPatientName(cleanedData.patientInfo.fullName);
+    
+    // Verify name appears in the raw text (basic validation)
+    if (!rawText.includes(cleanedData.patientInfo.fullName.split(' ')[0])) {
+      console.warn('Patient name may be incorrect - first name not found in raw text');
+      cleanedData.processingErrors = (cleanedData.processingErrors || []).concat(['Potential issue with patient name extraction']);
+    }
+  }
+  
+  // Clean and validate amount - ensure it follows currency format
+  if (cleanedData.billInfo?.totalAmount && cleanedData.billInfo.totalAmount !== "Not found") {
+    // Standardize amount format to include currency symbol and two decimal places
+    const amountMatch = cleanedData.billInfo.totalAmount.match(/(\$?)(\d+(?:\.\d+)?)/);
+    if (amountMatch) {
+      const [_, symbol, amount] = amountMatch;
+      // Format to proper currency with 2 decimal places
+      cleanedData.billInfo.totalAmount = `${symbol || '$'}${parseFloat(amount).toFixed(2)}`;
+    }
+    
+    // Verify amount appears in numerical data
+    if (cleanedData.numericalData?.allAmounts) {
+      const totalAmountWithoutSymbol = cleanedData.billInfo.totalAmount.replace(/[$,]/g, '');
+      const amountFound = cleanedData.numericalData.allAmounts.some(amt => 
+        amt.replace(/[$,]/g, '') === totalAmountWithoutSymbol
+      );
+      
+      if (!amountFound) {
+        console.warn('Total amount may be incorrect - not found in extracted numerical data');
+        cleanedData.billInfo.totalAmountVerified = false;
+        cleanedData.processingErrors = (cleanedData.processingErrors || []).concat(['Potential issue with total amount extraction']);
+      } else {
+        cleanedData.billInfo.totalAmountVerified = true;
+      }
+    }
+  }
+  
+  // Validate service codes
+  if (Array.isArray(cleanedData.services)) {
+    cleanedData.services = cleanedData.services.map(service => {
+      // Check and standardize CPT/HCPCS codes format
+      if (service.code && service.code !== "Not found") {
+        // Validate CPT/HCPCS code format (5 digits for CPT, alphanumeric for HCPCS)
+        const isValidCptCode = /^\d{5}$/.test(service.code.trim());
+        const isValidHcpcsCode = /^[A-Z]\d{4}$/.test(service.code.trim());
+        
+        if (!isValidCptCode && !isValidHcpcsCode) {
+          console.warn(`Potentially invalid service code: ${service.code}`);
+          service.codeValidationNote = 'Format may not match standard CPT/HCPCS';
+        }
+      }
+      
+      // Validate and standardize service amount
+      if (service.amount && service.amount !== "Not found") {
+        const amountMatch = service.amount.match(/(\$?)(\d+(?:\.\d+)?)/);
+        if (amountMatch) {
+          const [_, symbol, amount] = amountMatch;
+          // Format to proper currency with 2 decimal places
+          service.amount = `${symbol || '$'}${parseFloat(amount).toFixed(2)}`;
+        }
+      }
+      
+      return service;
+    });
+  }
+  
+  // Validate dates - ensure they follow standard formats
+  if (cleanedData.billInfo?.serviceDates && cleanedData.billInfo.serviceDates !== "Not found") {
+    const standardizedDate = standardizeDate(cleanedData.billInfo.serviceDates);
+    if (standardizedDate !== cleanedData.billInfo.serviceDates) {
+      cleanedData.billInfo.serviceDates = standardizedDate;
+    }
+  }
+  
+  if (cleanedData.billInfo?.dueDate && cleanedData.billInfo.dueDate !== "Not found") {
+    const standardizedDate = standardizeDate(cleanedData.billInfo.dueDate);
+    if (standardizedDate !== cleanedData.billInfo.dueDate) {
+      cleanedData.billInfo.dueDate = standardizedDate;
+    }
+  }
+  
+  // Validate diagnostic codes
+  if (Array.isArray(cleanedData.diagnosticCodes)) {
+    cleanedData.diagnosticCodes = cleanedData.diagnosticCodes
+      .filter(code => code && code !== "Not found")
+      .map(code => {
+        // ICD-10 codes typically start with a letter followed by numbers and possibly a decimal
+        const isValidIcd10 = /^[A-Z]\d+(\.\d+)?$/.test(code.trim());
+        if (!isValidIcd10) {
+          console.warn(`Potentially invalid diagnostic code: ${code}`);
+          return { code, validationNote: 'Format may not match standard ICD-10' };
+        }
+        return code;
+      });
+  }
+  
+  return cleanedData;
+}
+
+/**
+ * Extract all numerical data from raw text
+ * @param {string} text - Raw OCR text
+ * @returns {Object} - Object with arrays of extracted amounts and dates
+ */
+function extractAllNumericalData(text) {
+  if (!text) return { allAmounts: [], allDates: [] };
+  
+  // Extract all monetary amounts
+  const amounts = [];
+  const amountRegex = /(\$?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{2})/g;
+  let amountMatch;
+  while ((amountMatch = amountRegex.exec(text)) !== null) {
+    amounts.push(amountMatch[0]);
+  }
+  
+  // Extract all dates
+  const dates = [];
+  // Various date formats: MM/DD/YYYY, MM-DD-YYYY, MM.DD.YYYY
+  const dateRegex = /(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/g;
+  let dateMatch;
+  while ((dateMatch = dateRegex.exec(text)) !== null) {
+    dates.push(dateMatch[0]);
+  }
+  
+  // Extract alphanumeric medical codes
+  const codes = [];
+  const cptCodeRegex = /\b\d{5}\b/g; // CPT codes are 5 digits
+  const hcpcsCodeRegex = /\b[A-Z]\d{4}\b/g; // HCPCS codes are letter followed by 4 digits
+  const icdCodeRegex = /\b[A-Z]\d+\.\d+\b/g; // ICD-10 codes like F41.9
+  
+  let codeMatch;
+  while ((codeMatch = cptCodeRegex.exec(text)) !== null) {
+    codes.push({ type: 'CPT', code: codeMatch[0] });
+  }
+  while ((codeMatch = hcpcsCodeRegex.exec(text)) !== null) {
+    codes.push({ type: 'HCPCS', code: codeMatch[0] });
+  }
+  while ((codeMatch = icdCodeRegex.exec(text)) !== null) {
+    codes.push({ type: 'ICD', code: codeMatch[0] });
+  }
+  
+  return {
+    allAmounts: amounts,
+    allDates: dates,
+    allCodes: codes
+  };
+}
+
+/**
+ * Standardize date format
+ * @param {string} dateStr - Date string to standardize
+ * @returns {string} - Standardized date
+ */
+function standardizeDate(dateStr) {
+  if (!dateStr) return "Not found";
+  
+  // Check if it's a date range
+  if (dateStr.includes(' - ') || dateStr.includes(' to ')) {
+    // Split and standardize each part
+    const parts = dateStr.split(/ - | to /);
+    if (parts.length === 2) {
+      const start = standardizeSingleDate(parts[0]);
+      const end = standardizeSingleDate(parts[1]);
+      return `${start} - ${end}`;
+    }
+  }
+  
+  return standardizeSingleDate(dateStr);
+}
+
+/**
+ * Standardize a single date
+ * @param {string} dateStr - Single date string
+ * @returns {string} - Standardized date
+ */
+function standardizeSingleDate(dateStr) {
+  if (!dateStr) return "Not found";
+  
+  // Try to parse the date with various formats
+  const dateMatch = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (dateMatch) {
+    let [_, month, day, year] = dateMatch;
+    
+    // Ensure consistent padding
+    month = month.padStart(2, '0');
+    day = day.padStart(2, '0');
+    
+    // Add century if needed
+    if (year.length === 2) {
+      const currentYear = new Date().getFullYear().toString();
+      const century = currentYear.substring(0, 2);
+      year = `${century}${year}`;
+    }
+    
+    return `${month}/${day}/${year}`;
+  }
+  
+  return dateStr; // Return as is if not recognized
+}
+
+/**
+ * Calculate confidence score for extracted field
+ * @param {Object} fieldData - Data object with extracted fields
+ * @returns {number} - Confidence score between 0 and 1
+ */
+function calculateConfidenceScore(fieldData) {
+  if (!fieldData || typeof fieldData !== 'object') return 0;
+  
+  // Count fields that are not "Not found"
+  const fields = Object.keys(fieldData);
+  if (fields.length === 0) return 0;
+  
+  const foundFields = fields.filter(key => 
+    fieldData[key] && 
+    fieldData[key] !== "Not found" && 
+    fieldData[key] !== "Error"
+  );
+  
+  return foundFields.length / fields.length;
+}
+
+/**
+ * Clean patient name from common OCR artifacts
+ * @param {string} name - Raw extracted patient name
+ * @returns {string} - Cleaned patient name
+ */
+function cleanPatientName(name) {
+  if (!name) return "Not found";
+  
+  // Remove any text after common separators in patient information
+  const cleanName = name.split(/\s+(?:number|dob|date|account|id|#|paflent|pat|mrn)/i)[0].trim();
+  
+  // Remove common OCR artifacts
+  const artifactFreeText = cleanName
+    .replace(/[^\w\s\-'.,]/g, '') // Remove special characters except those common in names
+    .replace(/\b(patient|name|ptname)\b/i, '') // Remove common labels
+    .trim();
+  
+  // Limit length to avoid capturing too much text
+  return artifactFreeText.length > 30 ? artifactFreeText.substring(0, 30) : artifactFreeText;
+}
+
 export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
-  console.log('Starting client-side document analysis...', { fileUrl });
+  console.log('Starting client-side document analysis process...');
+  setUsingOpenAI(false); // Reset the flag
   
   try {
-    // Detect the file type
-    const fileType = await detectFileTypeClient(fileUrl);
+    // Check if file URL is valid
+    if (!fileUrl) {
+      throw new Error('No file URL provided');
+    }
     
-    // Extract text based on file type
-    console.log('Starting client-side text extraction process...');
+    // 1. Determine file type
+    const fileType = await detectFileTypeClient(fileUrl);
+    console.log('File type:', fileType);
+    
+    // 2. Extract text based on file type
     let extractedText = '';
+    setOcrProgress(progressHandler, { status: 'starting', progress: 0 });
     
     if (fileType === 'pdf') {
       extractedText = await extractTextFromPDFClient(fileUrl, progressHandler);
-    } else if (fileType === 'image') {
-      extractedText = await extractTextFromImageClient(fileUrl, progressHandler);
     } else {
-      throw new Error(`Unsupported file type: ${fileType}`);
+      extractedText = await extractTextFromImageClient(fileUrl, progressHandler);
     }
     
-    if (!extractedText || extractedText.trim().length === 0) {
-      console.warn('Extracted text is empty or whitespace only');
-      extractedText = 'No text could be extracted from the document.';
+    if (!extractedText) {
+      throw new Error('Text extraction failed or returned empty text');
     }
     
-    // Process the extracted text with the LLM
-    console.log('Processing extracted text with LLM...');
-    console.log('Extracted text length:', extractedText.length);
-    console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
+    console.log('Text extraction successful, length:', extractedText.length);
+    console.log('First 200 chars:', extractedText.substring(0, 200));
     
-    // First verify if it's a medical bill
-    console.log('Verifying if document is a medical bill...');
+    // 3. Extract all numerical data directly from raw text
+    const numericalData = extractNumericalDataFromText(extractedText);
+    console.log('Extracted numerical data:', 
+      numericalData.allAmounts.length, 'amounts,',
+      numericalData.allDates.length, 'dates,',
+      numericalData.allCodes.length, 'codes');
+    
+    // 4. First, check if it's a medical bill
+    setOcrProgress(progressHandler, { status: 'analyzing', progress: 0.7 });
     const verificationResult = await processWithClientLLM(extractedText, true);
     
-    if (!verificationResult.isMedicalBill) {
-      console.warn('Document does not appear to be a medical bill:', verificationResult.reason);
-      // Still proceed with extraction but log the warning
+    // 5. Process the text with LLM for structured data
+    setOcrProgress(progressHandler, { status: 'processing', progress: 0.85 });
+    let result = await processWithClientLLM(extractedText, false);
+    
+    // 6. Ensure numerical data is included
+    if (!result.numericalData || !result.numericalData.allAmounts) {
+      result.numericalData = numericalData;
     }
     
-    // Process the extracted text for data extraction
-    console.log('Extracting data from document...');
-    const result = await processWithClientLLM(extractedText, false);
+    // 7. Add raw text to result
+    result.extractedText = extractedText;
     
-    // Add verification results to the extraction result
+    // 8. Add verification result
     result.isMedicalBill = verificationResult.isMedicalBill;
     result.confidence = verificationResult.confidence;
-    result.verificationReason = verificationResult.reason;
     
-    // Add the extracted text to the result if not already present
-    if (!result.extractedText) {
-      result.extractedText = extractedText;
-    }
-    
-    // Add processing metadata
-    result.fileType = fileType;
+    // 9. Add processing metadata
+    result.processingMethod = 'client';
     result.processingTimestamp = new Date().toISOString();
     
-    console.log('Document analysis complete:', { 
-      textLength: extractedText.length,
-      isMedicalBill: result.isMedicalBill,
-      confidence: result.confidence,
-      processingMethod: result.processingMethod || 'client',
-      resultSummary: {
-        hasPatientInfo: !!result.patientInfo,
-        hasBillInfo: !!result.billInfo,
-        servicesCount: result.services?.length || 0,
-        hasInsuranceInfo: !!result.insuranceInfo
-      }
-    });
+    // 10. Validate and clean using validation function
+    result = validateAndCleanExtractedData(result, extractedText);
     
+    setOcrProgress(progressHandler, { status: 'complete', progress: 1 });
     return result;
   } catch (error) {
-    console.error('Document analysis error:', error);
+    console.error('Client-side document analysis failed:', error);
+    setOcrProgress(progressHandler, { status: 'error', message: error.message });
     
     // Return a valid structure even on error
     return {
-      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
-      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
-      services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
-      insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" },
+      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error" },
+      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error" },
+      services: [{ description: "Error", code: "Error", amount: "Error" }],
       isMedicalBill: false,
-      confidence: "error",
-      extractedText: "Error processing document: " + error.message,
+      confidence: "low",
+      errorMessage: error.message,
       processingMethod: 'error',
-      error: error.message,
-      processingTimestamp: new Date().toISOString()
+      extractedText: "Error processing document: " + error.message,
+      numericalData: { allAmounts: [], allDates: [], allCodes: [] }
     };
+  }
+}
+
+/**
+ * Helper function to update progress handler if available
+ * @param {Function} handler - Progress handler function
+ * @param {Object} progressData - Progress data to send
+ */
+function setOcrProgress(handler, progressData) {
+  if (typeof handler === 'function') {
+    handler(progressData);
   }
 } 
