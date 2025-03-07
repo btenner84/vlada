@@ -26,6 +26,47 @@ export function processAnalyzedData(rawData) {
   // Always treat as a potential medical bill for extraction purposes, regardless of isMedicalBill flag
   const forceAsMedicalBill = true;
   
+  // Handle potentially incomplete data structures
+  // Make sure we have all required top-level structures
+  if (!processedData.patientInfo) processedData.patientInfo = {};
+  if (!processedData.billInfo) processedData.billInfo = {};
+  if (!processedData.services) {
+    // Special handling for cases where services are missing but may be inferred from other data
+    console.log('No services found in data, checking for alternative structures');
+    
+    // Try to extract services from different data formats
+    if (processedData.numericalData?.allAmounts?.length > 0) {
+      console.log('Creating services from numerical data');
+      processedData.services = processedData.numericalData.allAmounts
+        .filter(amt => amt.includes('$') || amt.includes('.'))
+        .map((amount, index) => ({
+          description: `Service ${index + 1}`,
+          code: "-",
+          amount: amount,
+          details: "Extracted from bill amounts"
+        }));
+    } 
+    // If no services can be created, initialize with empty array
+    if (!processedData.services || processedData.services.length === 0) {
+      console.log('Creating default service');
+      
+      // Try to create a more informative default service using bill info
+      const defaultAmount = processedData.billInfo?.totalAmount || "-";
+      const defaultDescription = processedData.billInfo?.serviceDates ? 
+        `Service on ${processedData.billInfo.serviceDates}` : "Medical Service";
+      
+      processedData.services = [{
+        description: defaultDescription,
+        code: "-",
+        amount: defaultAmount,
+        details: "Service details unavailable"
+      }];
+    }
+  }
+  if (!processedData.insuranceInfo) processedData.insuranceInfo = {};
+  if (!processedData.diagnosticCodes) processedData.diagnosticCodes = [];
+  if (!processedData.numericalData) processedData.numericalData = { allAmounts: [], allDates: [], allCodes: [] };
+  
   // Direct extraction - if raw data has extractedText, always try to extract information
   if (processedData.extractedText) {
     console.log('Raw text found - attempting aggressive information extraction');
@@ -177,7 +218,22 @@ function processServices(services) {
     return [createEmptyService()];
   }
   
-  return services.map(service => ({
+  // Filter out invalid/empty services
+  const validServices = services.filter(service => {
+    // Check if this is an empty service or missing core information
+    const isEmpty = !service || 
+      (service.description === '-' && service.code === '-' && service.amount === '-');
+    
+    // Services with at least some information are valid
+    return !isEmpty;
+  });
+  
+  // If all services were empty, return a default empty service
+  if (validServices.length === 0) {
+    return [createEmptyService()];
+  }
+  
+  return validServices.map(service => ({
     description: ensureValue(service.description),
     code: ensureValue(service.code),
     amount: ensureValue(service.amount),
@@ -429,14 +485,14 @@ function extractPatientName(text) {
     // Pattern 1: After "Patient:" or "Name:" with potential continued text
     /(?:patient|name|patient name)[\s:]+([A-Za-z\s.,'-]+?)(?=\s+(?:number|dob|date|account|id|#|\r|\n|,|;|$))/i,
     
-    // Pattern 2: Capitalized names (2+ consecutive capitalized words)
-    /\b([A-Z][A-Za-z]{1,20}(?:\s+[A-Z][A-Za-z]{1,20}){1,3})\b/,
-    
-    // Pattern 3: After "PatientNome" (common OCR error for "Patient Name")
+    // Pattern 2: After "PatientNome" (common OCR error for "Patient Name")
     /(?:PatientNome)[\s:]+([A-Za-z\s.,'-]+?)(?=\s+(?:number|dob|date|account|id|#|\r|\n|,|;|$))/i,
     
-    // Pattern 4: Name-like pattern with Mr./Mrs./Ms. prefix
-    /\b(?:Mr\.|Mrs\.|Ms\.|Dr\.)\s+([A-Za-z\s.,'-]+?)(?=\s+|\r|\n|,|;|$)/i
+    // Pattern 3: Name-like pattern with Mr./Mrs./Ms. prefix
+    /\b(?:Mr\.|Mrs\.|Ms\.|Dr\.)\s+([A-Za-z\s.,'-]+?)(?=\s+|\r|\n|,|;|$)/i,
+    
+    // Pattern 4: Capitalized names (2+ consecutive capitalized words) with stricter validation
+    /\b([A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20}){1,3})\b/
   ];
   
   // Try each pattern in sequence
@@ -449,18 +505,13 @@ function extractPatientName(text) {
         .replace(/\s+/g, ' ')
         .trim();
       
-      if (name.length > 0 && name.length < 40) {
+      // Additional validation to avoid false positives
+      if (name.length > 0 && 
+          name.length < 40 && 
+          !/\b(?:TOTAL|AMOUNT|BALANCE|ADDITIONAL|NUMBER|EXTRACTED|INSURANCE)\b/i.test(name) &&
+          !/^\d/.test(name)) { // Don't allow names starting with numbers
         return name;
       }
-    }
-  }
-  
-  // If no pattern matches, look for any name-like sequence
-  const wordsInText = text.split(/\s+/);
-  for (let i = 0; i < wordsInText.length - 1; i++) {
-    // Check for two consecutive capitalized words
-    if (/^[A-Z][a-z]{2,}$/.test(wordsInText[i]) && /^[A-Z][a-z]{2,}$/.test(wordsInText[i+1])) {
-      return `${wordsInText[i]} ${wordsInText[i+1]}`;
     }
   }
   
