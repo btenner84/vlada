@@ -817,9 +817,16 @@ export default function Dashboard() {
       // Store the current bill ID before navigation
       const billToAnalyze = selectedBill;
       
+      // Add detailed logging
+      console.log('Starting analysis process for bill ID:', billToAnalyze);
+      console.log('Current origin:', window.location.origin);
+      
       // Reset states before navigation
       setSelectedBill('');
       setIsAnalyzing(false);
+      
+      // Log navigation attempt
+      console.log('Navigating to analysis page:', `/analysis/${billToAnalyze}`);
       
       // Navigate to the analysis page for the selected bill
       await router.push(`/analysis/${billToAnalyze}`);

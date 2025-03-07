@@ -1227,19 +1227,38 @@ export default function BillAnalysis() {
   }, [router, billId]);
 
   const fetchBillData = async (id, currentUser) => {
+    console.log(`Fetching bill data for ID: ${id}, user: ${currentUser?.uid || 'unknown'}`);
+    
     try {
-      console.log('Fetching bill data for ID:', id);
-      const billDoc = await getDoc(doc(db, 'bills', id));
-      if (!billDoc.exists()) {
-        throw new Error('Bill not found');
+      // Get bill document from Firestore
+      const docRef = doc(db, 'bills', id);
+      const docSnap = await getDoc(docRef);
+      
+      if (!docSnap.exists()) {
+        console.error(`Bill document not found: ${id}`);
+        setError("Bill not found");
+        setIsLoading(false);
+        return null;
       }
       
-      const data = { ...billDoc.data(), id };
-      console.log('Bill data fetched:', 
-        'status:', data.status,
-        'analysisData present:', !!data.analysisData,
-        'extractedData present:', !!data.extractedData
-      );
+      const data = { id: docSnap.id, ...docSnap.data() };
+      
+      // Add enhanced logging
+      console.log('Bill data retrieved:', {
+        fileName: data.fileName,
+        fileUrl: data.fileUrl?.substring(0, 50) + '...',
+        status: data.status,
+        userId: data.userId,
+        matchesCurrentUser: data.userId === currentUser?.uid
+      });
+      
+      // Verify ownership
+      if (data.userId !== currentUser?.uid) {
+        console.error(`User ID mismatch - Bill: ${data.userId}, Current: ${currentUser?.uid}`);
+        setError("You don't have permission to access this bill");
+        setIsLoading(false);
+        return null;
+      }
       
       setBillData(data);
       
@@ -1565,6 +1584,15 @@ export default function BillAnalysis() {
         const origin = window.location.origin;
         const apiUrl = `${origin}/api/analyze-full`;
         
+        // Add detailed debugging logs
+        console.log('Making API request to:', apiUrl);
+        console.log('Request method:', 'POST');
+        console.log('Request payload:', {
+          billId: billData.id,
+          fileUrl: billData.fileUrl,
+          userId: currentUser.uid
+        });
+        
         const response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1575,9 +1603,18 @@ export default function BillAnalysis() {
           })
         });
         
+        console.log('Response status:', response.status);
+        console.log('Response status text:', response.statusText);
+        
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Server OCR processing failed');
+          try {
+            const errorData = await response.json();
+            console.log('Error response data:', errorData);
+            throw new Error(errorData.error || 'Server OCR processing failed');
+          } catch (parseError) {
+            console.log('Failed to parse error response:', parseError.message);
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+          }
         }
         
         const data = await response.json();

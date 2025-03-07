@@ -131,7 +131,11 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
 };
 
 export default async function handler(req, res) {
+  // Add detailed debugging logs
   console.log('API Route: /api/analyze-full - Request received');
+  console.log('Request method:', req.method);
+  console.log('Request headers:', JSON.stringify(req.headers));
+  console.log('Request URL:', req.url);
   
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -199,7 +203,6 @@ export default async function handler(req, res) {
       requestId: `${billId}-${Date.now()}`,
       timestamp: new Date().toISOString()
     });
-    
   } catch (error) {
     console.error('Error in analyze-full endpoint:', error);
     res.status(500).json({
