@@ -1,8 +1,4 @@
 import React from 'react';
-import { Box, Card, CardContent, Typography, Chip, Alert, AlertTitle } from '@mui/material';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import CancelIcon from '@mui/icons-material/Cancel';
-import HelpIcon from '@mui/icons-material/Help';
 
 /**
  * Component to display the verification result for a document
@@ -13,32 +9,22 @@ import HelpIcon from '@mui/icons-material/Help';
 const VerificationResult = ({ verification, loading = false }) => {
   if (loading) {
     return (
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Document Verification
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Verifying document type...
-          </Typography>
-        </CardContent>
-      </Card>
+      <div className="p-4 mb-4 border rounded shadow-sm">
+        <h3 className="text-lg font-semibold mb-2">Document Verification</h3>
+        <p className="text-gray-600">Verifying document type...</p>
+      </div>
     );
   }
 
   if (!verification) {
     return (
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Document Verification
-          </Typography>
-          <Alert severity="info">
-            <AlertTitle>No Verification Data</AlertTitle>
-            Document has not been verified yet.
-          </Alert>
-        </CardContent>
-      </Card>
+      <div className="p-4 mb-4 border rounded shadow-sm">
+        <h3 className="text-lg font-semibold mb-2">Document Verification</h3>
+        <div className="p-4 bg-blue-50 text-blue-800 rounded">
+          <p className="font-bold">No Verification Data</p>
+          <p>Document has not been verified yet.</p>
+        </div>
+      </div>
     );
   }
 
@@ -46,60 +32,50 @@ const VerificationResult = ({ verification, loading = false }) => {
 
   // Determine confidence level display
   let confidenceDisplay;
-  let confidenceColor;
+  let confidenceColorClass;
   
   if (typeof confidence === 'number') {
     // Handle numeric confidence (0.0-1.0)
     if (confidence >= 0.8) {
       confidenceDisplay = 'High';
-      confidenceColor = 'success';
+      confidenceColorClass = 'bg-green-100 text-green-800';
     } else if (confidence >= 0.5) {
       confidenceDisplay = 'Medium';
-      confidenceColor = 'warning';
+      confidenceColorClass = 'bg-yellow-100 text-yellow-800';
     } else {
       confidenceDisplay = 'Low';
-      confidenceColor = 'error';
+      confidenceColorClass = 'bg-red-100 text-red-800';
     }
   } else {
     // Handle string confidence (for backward compatibility)
     confidenceDisplay = confidence || 'Unknown';
-    confidenceColor = 
-      confidence === 'high' ? 'success' :
-      confidence === 'medium' ? 'warning' :
-      confidence === 'low' ? 'error' : 'default';
+    confidenceColorClass = 
+      confidence === 'high' ? 'bg-green-100 text-green-800' :
+      confidence === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+      confidence === 'low' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
   }
 
   return (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          Document Verification
-        </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          {isMedicalBill ? (
-            <CheckCircleIcon color="success" sx={{ mr: 1 }} />
-          ) : (
-            <CancelIcon color="error" sx={{ mr: 1 }} />
-          )}
-          <Typography variant="body1" fontWeight="bold">
-            {isMedicalBill ? 'Medical Bill Detected' : 'Not a Medical Bill'}
-          </Typography>
-          <Chip 
-            label={`Confidence: ${confidenceDisplay}`}
-            color={confidenceColor}
-            size="small"
-            icon={<HelpIcon />}
-            sx={{ ml: 2 }}
-          />
-        </Box>
-        
-        <Alert severity={isMedicalBill ? "success" : "warning"}>
-          <AlertTitle>{isMedicalBill ? 'Verification Successful' : 'Verification Failed'}</AlertTitle>
-          {reason || 'No reason provided'}
-        </Alert>
-      </CardContent>
-    </Card>
+    <div className="p-4 mb-4 border rounded shadow-sm">
+      <h3 className="text-lg font-semibold mb-2">Document Verification</h3>
+      
+      <div className="flex items-center mb-3">
+        <span className={`mr-2 ${isMedicalBill ? 'text-green-600' : 'text-red-600'}`}>
+          {isMedicalBill ? '✓' : '✗'}
+        </span>
+        <span className="font-semibold">
+          {isMedicalBill ? 'Medical Bill Detected' : 'Not a Medical Bill'}
+        </span>
+        <span className={`ml-2 px-2 py-1 text-xs rounded ${confidenceColorClass}`}>
+          Confidence: {confidenceDisplay}
+        </span>
+      </div>
+      
+      <div className={`p-3 rounded ${isMedicalBill ? 'bg-green-50 text-green-800' : 'bg-yellow-50 text-yellow-800'}`}>
+        <p className="font-bold">{isMedicalBill ? 'Verification Successful' : 'Verification Failed'}</p>
+        <p>{reason || 'No reason provided'}</p>
+      </div>
+    </div>
   );
 };
 
