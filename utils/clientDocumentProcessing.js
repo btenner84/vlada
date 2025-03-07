@@ -2,6 +2,7 @@ import { createWorker } from 'tesseract.js';
 import OpenAI from 'openai';
 import { analyzeWithOpenAI } from '../services/openaiService';
 import { extractNumericalDataFromText } from './analyzedDataProcessor';
+import { auth } from '../firebase';
 
 // Client-side worker management
 let clientWorker = null;
@@ -908,89 +909,261 @@ function cleanPatientName(name) {
   return artifactFreeText.length > 30 ? artifactFreeText.substring(0, 30) : artifactFreeText;
 }
 
+// Add this comment near the extractTextWithGoogleVision function
+// Using the real Google Cloud Vision API endpoint
+export async function extractTextWithGoogleVision(fileUrl, progressHandler = null) {
+  try {
+    if (progressHandler) {
+      progressHandler({
+        status: 'processing',
+        step: 'google-vision',
+        progress: 0.1,
+        message: 'Sending document to Google Vision OCR...'
+      });
+    }
+    
+    // Validate the URL - it must be an HTTP(S) URL for Google Vision
+    if (!fileUrl.startsWith('http')) {
+      throw new Error('Google Vision requires an HTTP URL. Blob URLs are not supported.');
+    }
+    
+    // Get the auth token for the API request
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('User not authenticated');
+    }
+    
+    const token = await currentUser.getIdToken();
+    
+    console.log('Calling Google Vision API with URL:', fileUrl);
+    
+    // Using the real Google Vision API endpoint to test if billing is enabled
+    const response = await fetch('/api/google-vision-ocr', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ fileUrl })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: errorText };
+      }
+      
+      console.error('Google Vision OCR error:', errorData);
+      
+      // Handle specific error types
+      if (response.status === 402 || (errorData && errorData.processingMethod === 'google-vision-billing-error')) {
+        throw new Error('Google Cloud Vision requires billing to be enabled. Please contact the administrator to enable billing on the Google Cloud project.');
+      }
+      
+      if (response.status === 429 || (errorData && errorData.processingMethod === 'google-vision-quota-error')) {
+        throw new Error('Google Cloud Vision API quota has been exceeded. Please try again later or contact the administrator.');
+      }
+      
+      if (errorData && errorData.processingMethod === 'google-vision-api-error') {
+        throw new Error('Google Cloud Vision API is not enabled for this project. Please contact the administrator to enable the API.');
+      }
+      
+      throw new Error(`Google Vision OCR failed: ${errorData.message || errorData.error || response.statusText}`);
+    }
+
+    if (progressHandler) {
+      progressHandler({
+        status: 'processing',
+        step: 'google-vision',
+        progress: 0.5,
+        message: 'Processing OCR results...'
+      });
+    }
+    
+    const data = await response.json();
+    
+    // Check if this is mock data and log it
+    if (data._mockNotice) {
+      console.log('NOTICE:', data._mockNotice);
+    }
+    
+    // Prepare the structured data from the OCR results
+    let structuredData = {
+      extractedText: data.extractedText,
+      ocrConfidence: data.confidence,
+      processingMethod: data.processingMethod || 'google-vision',
+      extractedData: extractStructuredDataFromOCR(data.extractedText)
+    };
+    
+    // Try to extract table data if available
+    if (data.tables && data.tables.length > 0) {
+      structuredData.tables = data.tables;
+      
+      // Extract services from the tables if they look like service line items
+      const servicesFromTables = extractServicesFromTables(data.tables);
+      if (servicesFromTables.length > 0) {
+        structuredData.extractedData.services = [
+          ...(structuredData.extractedData.services || []),
+          ...servicesFromTables
+        ];
+      }
+    }
+    
+    if (progressHandler) {
+      progressHandler({
+        status: 'complete',
+        step: 'google-vision',
+        progress: 1.0,
+        message: 'OCR processing complete'
+      });
+    }
+    
+    return structuredData;
+  } catch (error) {
+    console.error('Google Vision OCR processing error:', error);
+    
+    if (progressHandler) {
+      progressHandler({
+        status: 'error',
+        step: 'google-vision',
+        error: error.message,
+        message: 'Error processing document with Google Vision OCR'
+      });
+    }
+    
+    throw error;
+  }
+}
+
+// Helper function to extract services from OCR detected tables
+function extractServicesFromTables(tables) {
+  const services = [];
+  
+  tables.forEach(table => {
+    // Skip tables with less than 2 rows (header + at least one service)
+    if (!table.rows || table.rows.length < 2) return;
+    
+    // Look for tables that look like service line items
+    // Typically they have columns for service name, date, code, quantity, amount, etc.
+    table.rows.slice(1).forEach(row => {
+      // Skip rows with less than 2 cells
+      if (row.length < 2) return;
+      
+      // Try to identify service information from the row
+      const serviceObj = {
+        description: '',
+        code: '',
+        amount: 0,
+        date: '',
+        _raw: row.join(' | ')
+      };
+      
+      // Check each cell for potential service information
+      row.forEach((cell, index) => {
+        // If this cell appears to be a description (longer text without numbers)
+        if (cell.length > 5 && !/^\d+$/.test(cell)) {
+          serviceObj.description = cell;
+        }
+        
+        // If this looks like a service code (alphanumeric code format)
+        if (/^[A-Z0-9]{5,}$/.test(cell)) {
+          serviceObj.code = cell;
+        }
+        
+        // If this looks like a dollar amount
+        if (/\$?\d+\.\d{2}/.test(cell)) {
+          const match = cell.match(/\$?(\d+\.\d{2})/);
+          if (match) {
+            serviceObj.amount = parseFloat(match[1]);
+          }
+        }
+        
+        // If this looks like a date
+        if (/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(cell)) {
+          serviceObj.date = cell;
+        }
+      });
+      
+      // Only add services that have at least a description or code, and an amount
+      if ((serviceObj.description || serviceObj.code) && serviceObj.amount) {
+        services.push(serviceObj);
+      }
+    });
+  });
+  
+  return services;
+}
+
+// Enhance the analyzeBillDocument function to use Google Vision OCR with fallback
 export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
   console.log('Starting client-side document analysis process...');
-  setUsingOpenAI(false); // Reset the flag
   
   try {
-    // Check if file URL is valid
-    if (!fileUrl) {
-      throw new Error('No file URL provided');
-    }
-    
-    // 1. Determine file type
+    // Detect file type first
     const fileType = await detectFileTypeClient(fileUrl);
-    console.log('File type:', fileType);
+    console.log('Detected file type:', fileType);
     
-    // 2. Extract text based on file type
-    let extractedText = '';
-    setOcrProgress(progressHandler, { status: 'starting', progress: 0 });
+    let result;
     
-    if (fileType === 'pdf') {
-      extractedText = await extractTextFromPDFClient(fileUrl, progressHandler);
-    } else {
-      extractedText = await extractTextFromImageClient(fileUrl, progressHandler);
+    // Try Google Vision OCR first
+    try {
+      if (progressHandler) {
+        progressHandler({
+          status: 'processing',
+          step: 'ocr',
+          progress: 0.1,
+          message: 'Starting OCR with Google Vision...'
+        });
+      }
+      
+      console.log('Attempting Google Vision OCR...');
+      result = await extractTextWithGoogleVision(fileUrl, progressHandler);
+      console.log('Google Vision OCR successful');
+      
+      // Add file type info
+      result.fileType = fileType;
+      return result;
+    } catch (googleVisionError) {
+      console.warn('Google Vision OCR failed, falling back to alternative methods:', googleVisionError);
+      
+      if (progressHandler) {
+        progressHandler({
+          status: 'processing',
+          step: 'ocr',
+          progress: 0.2,
+          message: 'Falling back to alternative OCR methods...'
+        });
+      }
+      
+      // Continue with existing methods as fallback
+      if (fileType === 'image') {
+        console.log('Using image OCR fallback');
+        result = await extractTextFromImageClient(fileUrl, progressHandler);
+      } else if (fileType === 'pdf') {
+        console.log('Using PDF extraction fallback');
+        result = await extractTextFromPDFClient(fileUrl, progressHandler);
+      } else {
+        throw new Error(`Unsupported file type: ${fileType}`);
+      }
+      
+      // Add file type info
+      result.fileType = fileType;
+      return result;
     }
-    
-    if (!extractedText) {
-      throw new Error('Text extraction failed or returned empty text');
-    }
-    
-    console.log('Text extraction successful, length:', extractedText.length);
-    console.log('First 200 chars:', extractedText.substring(0, 200));
-    
-    // 3. Extract all numerical data directly from raw text
-    const numericalData = extractNumericalDataFromText(extractedText);
-    console.log('Extracted numerical data:', 
-      numericalData.allAmounts.length, 'amounts,',
-      numericalData.allDates.length, 'dates,',
-      numericalData.allCodes.length, 'codes');
-    
-    // 4. First, check if it's a medical bill
-    setOcrProgress(progressHandler, { status: 'analyzing', progress: 0.7 });
-    const verificationResult = await processWithClientLLM(extractedText, true);
-    
-    // 5. Process the text with LLM for structured data
-    setOcrProgress(progressHandler, { status: 'processing', progress: 0.85 });
-    let result = await processWithClientLLM(extractedText, false);
-    
-    // 6. Ensure numerical data is included
-    if (!result.numericalData || !result.numericalData.allAmounts) {
-      result.numericalData = numericalData;
-    }
-    
-    // 7. Add raw text to result
-    result.extractedText = extractedText;
-    
-    // 8. Add verification result
-    result.isMedicalBill = verificationResult.isMedicalBill;
-    result.confidence = verificationResult.confidence;
-    
-    // 9. Add processing metadata
-    result.processingMethod = 'client';
-    result.processingTimestamp = new Date().toISOString();
-    
-    // 10. Validate and clean using validation function
-    result = validateAndCleanExtractedData(result, extractedText);
-    
-    setOcrProgress(progressHandler, { status: 'complete', progress: 1 });
-    return result;
   } catch (error) {
-    console.error('Client-side document analysis failed:', error);
-    setOcrProgress(progressHandler, { status: 'error', message: error.message });
-    
-    // Return a valid structure even on error
-    return {
-      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error" },
-      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error" },
-      services: [{ description: "Error", code: "Error", amount: "Error" }],
-      isMedicalBill: false,
-      confidence: "low",
-      errorMessage: error.message,
-      processingMethod: 'error',
-      extractedText: "Error processing document: " + error.message,
-      numericalData: { allAmounts: [], allDates: [], allCodes: [] }
-    };
+    console.error('Client document analysis error:', error);
+    if (progressHandler) {
+      progressHandler({
+        status: 'error',
+        step: 'analysis',
+        message: `Document analysis failed: ${error.message}`,
+        error: error.message
+      });
+    }
+    throw error;
   }
 }
 

@@ -1,15 +1,16 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { auth } from '../firebase';
 import { theme } from '../styles/theme';
 import Link from 'next/link';
 import { doc, getDoc, updateDoc, arrayUnion, setDoc, deleteDoc } from 'firebase/firestore';
 import { db, storage } from '../firebase';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, uploadBytesResumable } from 'firebase/storage';
 import { collection, addDoc, serverTimestamp, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
 
 export default function Dashboard() {
   const router = useRouter();
+  const fileInputRef = useRef(null);
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,7 +19,7 @@ export default function Dashboard() {
   const [fileName, setFileName] = useState('');
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [recentUploads, setRecentUploads] = useState([]);
+  const [uploads, setUploads] = useState([]);
   const [deletingFile, setDeletingFile] = useState(false);
   const [selectedBill, setSelectedBill] = useState('');
   const [selectedBillForDispute, setSelectedBillForDispute] = useState('');
@@ -28,122 +29,337 @@ export default function Dashboard() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAllUploads, setShowAllUploads] = useState(false);
   const [showAllAnalyzedBills, setShowAllAnalyzedBills] = useState(false);
+  const [fileToUpload, setFileToUpload] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Add the auth state listener
+  useEffect(() => {
+    console.log('Setting up auth state listener');
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      console.log('Auth state changed:', user ? 'logged in' : 'logged out');
+      if (user) {
+        setUser(user);
+        
+        // Fetch user profile
+        console.log('Fetching user profile...');
+        try {
+          const profileDoc = await getDoc(doc(db, 'userProfiles', user.uid));
+          if (profileDoc.exists()) {
+            console.log('Profile loaded, fetching bills...');
+            setUserProfile(profileDoc.data());
+            
+            // Fetch bills after profile is loaded
+            console.log('Initial dashboard data fetch');
+            await Promise.all([
+              fetchUploads(),
+              fetchAnalyzedBills()
+            ]);
+          } else {
+            console.log('No user profile found');
+            // Redirect to profile setup if needed
+            // router.push('/profile-setup');
+          }
+          console.log('Successfully loaded all dashboard data');
+        } catch (error) {
+          console.error('Error fetching user profile:', error);
+        }
+      } else {
+        // User is not logged in, redirect to sign-in
+        console.log('No user logged in, redirecting...');
+        router.push('/signin');
+      }
+      
+      setIsLoading(false);
+    });
+    
+    return () => unsubscribe();
+  }, [router]); // Don't add fetchUploads and fetchAnalyzedBills to the deps array to avoid loops
 
   const fetchUploads = useCallback(async () => {
     if (!user) return;
-
+    
+    console.log('Fetching uploads for user:', user.uid);
     try {
+      // Add a timestamp parameter to avoid caching
+      const timestamp = Date.now();
+      const uploadRef = collection(db, 'bills');
       const q = query(
-        collection(db, 'bills'),
+        uploadRef,
         where('userId', '==', user.uid),
-        orderBy('timestamp', 'desc')
+        orderBy('timestamp', 'desc'),
+        limit(20)
       );
-
+      
       const querySnapshot = await getDocs(q);
+      
       const uploads = querySnapshot.docs.map(doc => {
         const data = doc.data();
-        console.log('Raw bill data:', data); // Log raw data
+        console.log('Raw bill data:', data);
+        
+        // Create a timestamp for display and sorting
+        let displayDate = null;
+        try {
+          // Reuse the same getDateValue function for consistency
+          const getTimestamp = (field) => {
+            if (!field) return 0;
+            
+            try {
+              // Handle Firestore Timestamp objects
+              if (field && typeof field === 'object' && field.toDate) {
+                return field.toDate();
+              }
+              
+              // Handle objects with seconds and nanoseconds (another Firestore timestamp format)
+              if (field && typeof field === 'object' && field.seconds !== undefined) {
+                return new Date((field.seconds * 1000) + (field.nanoseconds / 1000000));
+              }
+              
+              // Handle ISO string dates
+              if (typeof field === 'string') {
+                return new Date(field);
+              }
+              
+              // Handle numeric timestamps
+              if (typeof field === 'number') {
+                return new Date(field);
+              }
+              
+              return new Date();
+            } catch (e) {
+              console.error('Error processing date:', e);
+              return new Date();
+            }
+          };
+          
+          // Try different timestamp fields with fallbacks
+          displayDate = getTimestamp(data.uploadedAt) || 
+                         getTimestamp(data.timestamp) || 
+                         getTimestamp(data.createdAt) || 
+                         new Date();
+          
+          console.log('Processed display date:', displayDate.toString());
+        } catch (e) {
+          console.error('Error processing date for upload', doc.id, e);
+          displayDate = new Date();
+        }
+        
         return {
           id: doc.id,
-          fileName: data.fileName,
-          uploadedAt: data.uploadedAt?.toDate().toLocaleString() || new Date().toLocaleString(),
+          fileName: data.fileName || data.originalName || 'Unnamed File',
+          uploadDate: displayDate,
+          status: data.status || 'pending',
+          isAnalyzed: data.status === 'analyzed',
           fileUrl: data.fileUrl,
           storagePath: data.storagePath || `bills/${user.uid}/${data.timestamp}_${data.fileName}` // Fallback if storagePath is missing
         };
       });
 
       console.log('Processed uploads:', uploads); // Log processed data
-      setRecentUploads(uploads);
+      setUploads(uploads);
     } catch (error) {
       console.error('Error fetching uploads:', error);
     }
-  }, [user]);
+  }, [user]); // Only depend on user
 
   const fetchAnalyzedBills = useCallback(async () => {
     if (!user) return;
 
-    console.log('Fetching analyzed bills for user:', user.uid);
+    console.log('🔍 Fetching analyzed bills for user:', user.uid);
     try {
-      // Simpler query that doesn't require a composite index
-      const q = query(
+      // Generate a unique timestamp to avoid caching
+      const cacheKey = Date.now();
+      
+      // First, get all bills for the user to aid in debugging
+      const allBillsQuery = query(
         collection(db, 'bills'),
         where('userId', '==', user.uid)
       );
-
-      const querySnapshot = await getDocs(q);
-      console.log('Found bills:', querySnapshot.size);
       
+      const allBillsSnapshot = await getDocs(allBillsQuery);
+      console.log(`📊 Total bills for user: ${allBillsSnapshot.size} (cache key: ${cacheKey})`);
+      
+      // Detailed logging of ALL bills regardless of status
+      console.log('📋 ALL BILLS FOR USER (regardless of status):');
+      allBillsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        console.log(`Bill ${doc.id}: 
+          status = ${data.status || 'undefined'}, 
+          fileName = ${data.fileName || 'undefined'}, 
+          analyzedAt = ${data.analyzedAt ? (data.analyzedAt.toDate?.() || data.analyzedAt) : 'missing'},
+          latestAnalysisId = ${data.latestAnalysisId || 'missing'},
+          userId = ${data.userId || 'missing'}`
+        );
+      });
+      
+      // Find bills that should be analyzed but don't have the right status
+      const needsStatusUpdate = allBillsSnapshot.docs.filter(doc => {
+        const data = doc.data();
+        return (data.analyzedAt || data.latestAnalysisId) && data.status !== 'analyzed';
+      });
+      
+      // Fix any bills with missing status
+      if (needsStatusUpdate.length > 0) {
+        console.log(`🔧 Found ${needsStatusUpdate.length} bills that need status fixed`);
+        
+        // Update these bills to have status "analyzed"
+        const updatePromises = needsStatusUpdate.map(doc => {
+          console.log(`⚒️ Fixing status for bill: ${doc.id}`);
+          return updateDoc(doc.ref, {
+            status: 'analyzed',
+            updatedAt: serverTimestamp()
+          });
+        });
+        
+        // Use Promise.all to ensure all updates complete before proceeding
+        await Promise.all(updatePromises);
+        console.log('✅ Status fixes applied');
+      }
+      
+      // Now query specifically for analyzed bills - add a timestamp to avoid caching issues
+      console.log(`🔎 Querying specifically for bills with status="analyzed" at ${cacheKey}`);
+      const q = query(
+        collection(db, 'bills'),
+        where('userId', '==', user.uid),
+        where('status', '==', 'analyzed')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      console.log(`📝 Found ${querySnapshot.size} bills with status="analyzed"`);
+      
+      if (querySnapshot.size === 0) {
+        console.warn('⚠️ No analyzed bills found even after fixing statuses!');
+        setAnalyzedBills([]);
+        return;
+      }
+      
+      // Log IDs of bills found with status="analyzed"
+      console.log('📑 Bills with status="analyzed":');
+      querySnapshot.docs.forEach(doc => {
+        console.log(`  - ${doc.id} (${doc.data().fileName || 'unnamed'})`);
+      });
+        
       const bills = querySnapshot.docs
         .map(doc => {
           const data = doc.data();
           console.log('Processing bill:', doc.id, data);
           
-          // Only include bills that have been analyzed
-          if (!data.analyzedAt) return null;
-
-          // Convert timestamps to dates if needed
-          let analyzedAt = data.analyzedAt;
-          if (data.analyzedAt && typeof data.analyzedAt.toDate === 'function') {
-            analyzedAt = data.analyzedAt.toDate().toISOString();
-          }
-
+          // Create a consistent date representation for sorting and display
+          const getDateValue = (dateField) => {
+            if (!dateField) return 0;
+            
+            try {
+              // Handle Firestore Timestamp objects
+              if (dateField && typeof dateField === 'object' && dateField.toDate) {
+                console.log(`Converting Firestore timestamp to date: ${dateField.toDate()}`);
+                return dateField.toDate().getTime();
+              }
+              
+              // Handle objects with seconds and nanoseconds (another Firestore timestamp format)
+              if (dateField && typeof dateField === 'object' && dateField.seconds !== undefined) {
+                console.log(`Converting seconds/nanoseconds to date: ${new Date((dateField.seconds * 1000) + (dateField.nanoseconds / 1000000))}`);
+                return (dateField.seconds * 1000) + (dateField.nanoseconds / 1000000);
+              }
+              
+              // Handle ISO string dates
+              if (typeof dateField === 'string') {
+                const parsedDate = new Date(dateField);
+                console.log(`Converting string date: ${dateField} to ${parsedDate}`);
+                return parsedDate.getTime();
+              }
+              
+              // Handle numeric timestamps
+              if (typeof dateField === 'number') {
+                console.log(`Using numeric timestamp: ${dateField} (${new Date(dateField)})`);
+                return dateField;
+              }
+              
+              console.log(`Could not convert date field: ${JSON.stringify(dateField)}`);
+              return 0;
+            } catch (e) {
+              console.error('Error converting date field:', e, 'Field value was:', JSON.stringify(dateField));
+              return 0;
+            }
+          };
+          
+          // Get timestamp values for sorting
+          const analyzedTime = getDateValue(data.analyzedAt);
+          const updatedTime = getDateValue(data.updatedAt);
+          const createdTime = getDateValue(data.timestamp || data.createdAt || data.uploadedAt);
+          
+          // Create a display timestamp for UI
+          const displayDate = analyzedTime ? new Date(analyzedTime) : 
+                             (updatedTime ? new Date(updatedTime) : 
+                             (createdTime ? new Date(createdTime) : new Date()));
+          
+          // Create a synthetic display order key if none exists
+          const syntheticKey = data.displayOrderKey || 
+                               `${analyzedTime || 0}_${updatedTime || 0}_${doc.id}`;
+          
           return {
             id: doc.id,
-            fileName: data.fileName,
-            analyzedAt: analyzedAt,
-            isMedicalBill: data.isMedicalBill,
-            confidence: data.confidence,
+            fileName: data.fileName || 'Unnamed Bill',
+            analyzedAt: displayDate,
+            // Store raw timestamp values for sorting
+            _analyzedTime: analyzedTime,
+            _updatedTime: updatedTime,
+            _createdTime: createdTime,
+            displayOrderKey: syntheticKey,
+            isMedicalBill: data.isMedicalBill || false,
+            confidence: data.confidence || 'low',
             totalAmount: data.extractedData?.billInfo?.totalAmount || 'N/A',
-            serviceDates: data.extractedData?.billInfo?.serviceDates || 'N/A'
+            fileUrl: data.fileUrl || '',
+            status: data.status
           };
         })
-        .filter(bill => bill !== null)
+        // Sort by analyzed date (newest first), then update date, then display order key
         .sort((a, b) => {
-          // Sort by analyzedAt date in descending order
-          const dateA = new Date(a.analyzedAt);
-          const dateB = new Date(b.analyzedAt);
-          return dateB - dateA;
+          // If either bill has displayOrderKey, use it for primary sort if it looks like a timestamp-based key
+          if (a.displayOrderKey && b.displayOrderKey) {
+            // If display order keys contain timestamps (usually formatted as NUMBER_text)
+            const aTimestampMatch = a.displayOrderKey.match(/^(\d+)/);
+            const bTimestampMatch = b.displayOrderKey.match(/^(\d+)/);
+            
+            if (aTimestampMatch && bTimestampMatch) {
+              const aTimestamp = parseInt(aTimestampMatch[1], 10);
+              const bTimestamp = parseInt(bTimestampMatch[1], 10);
+              
+              // If both have valid numeric parts, use them (newest first)
+              if (!isNaN(aTimestamp) && !isNaN(bTimestamp)) {
+                // Log the sorting decision for debugging
+                console.log(`Sorting by displayOrderKey timestamps: ${a.fileName} (${aTimestamp}) vs ${b.fileName} (${bTimestamp})`);
+                return bTimestamp - aTimestamp;
+              }
+            }
+          }
+          
+          // Next, try to sort by analyzedAt time
+          if (a._analyzedTime !== 0 && b._analyzedTime !== 0 && a._analyzedTime !== b._analyzedTime) {
+            console.log(`Sorting by analyzedTime: ${a.fileName} (${a._analyzedTime}) vs ${b.fileName} (${b._analyzedTime})`);
+            return b._analyzedTime - a._analyzedTime; // newest first
+          }
+          
+          // If analyzed times are the same or zero, sort by updated time
+          if (a._updatedTime !== 0 && b._updatedTime !== 0 && a._updatedTime !== b._updatedTime) {
+            console.log(`Sorting by updatedTime: ${a.fileName} (${a._updatedTime}) vs ${b.fileName} (${b._updatedTime})`);
+            return b._updatedTime - a._updatedTime; // newest first
+          }
+          
+          // Last resort: compare IDs for stable sort
+          console.log(`Sorting by ID: ${a.fileName} (${a.id}) vs ${b.fileName} (${b.id})`);
+          return a.id.localeCompare(b.id);
         });
 
-      console.log('Setting analyzed bills:', bills);
+      console.log(`✅ Processed ${bills.length} analyzed bills:`, bills);
       setAnalyzedBills(bills);
     } catch (error) {
-      console.error('Error fetching analyzed bills:', error);
+      console.error('❌ Error fetching analyzed bills:', error);
+      // Set empty array to avoid undefined errors in the UI
+      setAnalyzedBills([]);
     }
-  }, [user]);
+  }, [user, db]); // Add db to dependencies
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      console.log('Auth state changed:', user ? 'logged in' : 'logged out');
-      if (user) {
-        setUser(user);
-        // Fetch user profile
-        try {
-          console.log('Fetching user profile...');
-          const profileDoc = await getDoc(doc(db, 'userProfiles', user.uid));
-          if (profileDoc.exists()) {
-            setUserProfile(profileDoc.data());
-            // Fetch bills after profile is loaded
-            console.log('Profile loaded, fetching bills...');
-            await Promise.all([
-              fetchUploads(),
-              fetchAnalyzedBills()
-            ]);
-            console.log('Successfully loaded all dashboard data');
-          } else {
-            // Redirect to profile setup if no profile exists
-            console.log('No profile found, redirecting to setup');
-            router.push('/profile-setup');
-          }
-        } catch (error) {
-          console.error('Error loading dashboard data:', error);
-        }
-      } else {
-        router.push('/signin');
-      }
-      setIsLoading(false);
-    });
-
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
     };
@@ -155,27 +371,39 @@ export default function Dashboard() {
     }
 
     return () => {
-      unsubscribe();
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', handleResize);
       }
     };
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     // Listen for route changes to refresh data when returning to dashboard
     const handleRouteChange = async (url) => {
       console.log('Route changed to:', url);
       if (url === '/dashboard' && user) {
-        console.log('Returned to dashboard, refreshing data...');
-        try {
-          await Promise.all([
-            fetchUploads(),
-            fetchAnalyzedBills()
-          ]);
-          console.log('Successfully refreshed dashboard data');
-        } catch (error) {
-          console.error('Error refreshing dashboard data:', error);
+        console.log('Returned to dashboard, checking if refresh needed...');
+        
+        // Check if we need to force a refresh (set from analysis page)
+        const needsRefresh = localStorage.getItem('dashboardNeedsRefresh');
+        const isForceRefresh = needsRefresh === 'true';
+        const lastAnalyzedBillId = localStorage.getItem('lastAnalyzedBillId');
+        
+        if (isForceRefresh) {
+          console.log('Dashboard needs refresh flag detected, forcing refresh');
+          localStorage.removeItem('dashboardNeedsRefresh');
+          
+          // Get the ID of the last analyzed bill for highlighting
+          if (lastAnalyzedBillId) {
+            console.log('Last analyzed bill ID:', lastAnalyzedBillId);
+            localStorage.removeItem('lastAnalyzedBillId');
+          }
+          
+          // When returning from analysis, perform a more comprehensive refresh
+          await performDashboardRefresh(true, lastAnalyzedBillId);
+        } else {
+          console.log('Normal dashboard refresh');
+          await performDashboardRefresh(false);
         }
       }
     };
@@ -197,6 +425,83 @@ export default function Dashboard() {
       router.events.off('routeChangeComplete', handleRouteChange);
     };
   }, [router, user, fetchUploads, fetchAnalyzedBills]);
+
+  // Separate function to handle dashboard refresh logic
+  const performDashboardRefresh = async (isAfterAnalysis, analyzedBillId = null) => {
+    try {
+      console.log(`🔄 Starting dashboard refresh (post-analysis: ${isAfterAnalysis ? 'yes' : 'no'})`);
+      
+      // Always clear existing data first to avoid UI flicker with outdated data
+      console.log('Clearing existing data arrays...');
+      setAnalyzedBills([]);
+      setUploads([]);
+      
+      // Add longer delays for post-analysis refresh to ensure Firestore writes are completed
+      const initialDelay = isAfterAnalysis ? 2500 : 500;
+      console.log(`⏳ Waiting ${initialDelay}ms before first data fetch...`);
+      await new Promise(resolve => setTimeout(resolve, initialDelay));
+      
+      // Force a fresh fetch from Firestore with cache busting
+      const timestamp = Date.now();
+      console.log(`📊 First data fetch at timestamp: ${timestamp}`);
+      
+      // First data fetch
+      await Promise.all([
+        fetchUploads(),
+        fetchAnalyzedBills()
+      ]);
+      
+      // For post-analysis refresh, do multiple fetches with increasing delays to ensure consistency
+      if (isAfterAnalysis) {
+        // Longer delay after analysis
+        const secondDelay = 3500;
+        console.log(`⏳ Waiting ${secondDelay}ms before second fetch...`);
+        
+        // Use a proper async delay pattern
+        await new Promise(resolve => {
+          setTimeout(async () => {
+            try {
+              console.log('🔍 Performing second fetch to ensure consistency...');
+              await Promise.all([
+                fetchUploads(),
+                fetchAnalyzedBills()
+              ]);
+              
+              // If we still don't see the analyzed bill, do a third attempt
+              if (analyzedBillId) {
+                const foundBill = analyzedBills.find(bill => bill.id === analyzedBillId);
+                if (!foundBill) {
+                  console.log(`⚠️ Bill ${analyzedBillId} not found in second fetch, waiting for third fetch...`);
+                  // Longer final delay
+                  setTimeout(async () => {
+                    console.log('🔍 Performing third and final fetch...');
+                    await Promise.all([
+                      fetchUploads(),
+                      fetchAnalyzedBills()
+                    ]);
+                    console.log('✅ Final fetch complete, dashboard data should be stable now');
+                    resolve();
+                  }, 5000);
+                } else {
+                  console.log(`✅ Bill ${analyzedBillId} found in second fetch`);
+                  resolve();
+                }
+              } else {
+                resolve();
+              }
+            } catch (error) {
+              console.error('Error in second fetch:', error);
+              resolve();
+            }
+          }, secondDelay);
+        });
+      }
+      
+      console.log('Dashboard refresh sequence completed');
+    } catch (error) {
+      console.error('Error in performDashboardRefresh:', error);
+    }
+  };
 
   const UserAvatar = ({ email }) => (
     <div style={{
@@ -318,176 +623,184 @@ export default function Dashboard() {
 
   const handleFileSelect = (event) => {
     const file = event.target.files[0];
-    console.log('File selected:', file);
-    if (file) {
-      setSelectedFile(file);
-      setFileName(file.name);
-      setShowNameDialog(true);
+    if (!file) return;
+    
+    console.log('File selected:', {
+      name: file.name,
+      type: file.type,
+      size: file.size
+    });
+    
+    // Reset any previous upload errors
+    setUploadError('');
+    
+    // Validate file type
+    const validTypes = ['image/jpeg', 'image/png', 'image/heic', 'application/pdf'];
+    if (!validTypes.includes(file.type)) {
+      setUploadError('Please select a valid file type (PDF, JPEG, PNG, HEIC)');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
     }
+    
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      setUploadError('File size should be less than 10MB');
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+    
+    // Set the selected file
+    setFileToUpload(file);
+    
+    // Show the name dialog for manual upload
+    setFileName(file.name);
+    setShowNameDialog(true);
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !fileName) {
-      console.error('No file or filename provided');
+    if (!fileToUpload || !fileName) {
+      setUploadError('Please select a file and provide a name');
       return;
     }
     
     setUploadingFile(true);
-    console.log('Starting upload process:', {
-      fileName,
-      fileSize: selectedFile.size,
-      fileType: selectedFile.type,
-      userId: user?.uid
-    });
-
+    setUploadError('');
+    setUploadProgress(0);
+    
+    console.log('Starting file upload process...');
+    
     try {
-      const timestamp = Date.now();
-      const storageRef = ref(storage, `bills/${user.uid}/${timestamp}_${fileName}`);
-      console.log('Created storage reference:', storageRef.fullPath);
+      // Create a more unique filename with timestamp and original name
+      const currentTimestamp = Date.now();
+      const cleanFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const displayOrderKey = `${currentTimestamp}_${cleanFileName}`;
       
-      const metadata = {
-        contentType: selectedFile.type,
-        customMetadata: {
-          userId: user.uid,
-          fileName: fileName,
-          timestamp: timestamp.toString()
+      // Generate a storage path using the timestamp for uniqueness
+      const storagePath = `bills/${user.uid}/${currentTimestamp}_${cleanFileName}`;
+      console.log('Storage path:', storagePath);
+      
+      // Upload file to Firebase Storage
+      const storageRef = ref(storage, storagePath);
+      const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
+      
+      // Set up upload progress listener
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          setUploadProgress(progress);
+          console.log('Upload progress:', progress);
+        },
+        (error) => {
+          console.error('Upload error:', error);
+          setUploadError('Failed to upload file: ' + error.message);
+          setUploadingFile(false);
+        },
+        async () => {
+          // Upload completed successfully, get download URL
+          console.log('Upload completed, getting download URL...');
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          
+          // Save bill metadata to Firestore
+          console.log('Saving metadata to Firestore...');
+          
+          // Use a server timestamp for consistent timing across the app
+          const now = serverTimestamp();
+          
+          // Create a document in the bills collection
+          const billDocRef = await addDoc(collection(db, 'bills'), {
+            fileName: cleanFileName,
+            originalName: fileToUpload.name,
+            timestamp: currentTimestamp,
+            displayOrderKey: displayOrderKey,
+            fileUrl: downloadURL,
+            storagePath: storagePath,
+            fileType: fileToUpload.type,
+            fileSize: fileToUpload.size,
+            userId: user.uid,
+            uploadedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            status: 'pending'  // Initial status is pending until analyzed
+          });
+          
+          console.log('Saved to Firestore with ID:', billDocRef.id);
+          
+          // Update user profile with the upload
+          const userProfileRef = doc(db, 'userProfiles', user.uid);
+          await updateDoc(userProfileRef, {
+            uploads: arrayUnion({
+              timestamp: currentTimestamp,
+              billId: billDocRef.id,
+              fileName: cleanFileName
+            })
+          });
+          
+          // Reset the file input and state
+          setFileToUpload(null);
+          setFileName('');
+          setShowNameDialog(false);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+          setUploadingFile(false);
+          
+          // Force a refresh of both uploads and analyzed bills
+          console.log('Refreshing dashboard data after upload...');
+          await fetchUploads();
+          
+          alert('File uploaded successfully!');
         }
-      };
-
-      console.log('Starting file upload to Storage...');
-      const snapshot = await uploadBytes(storageRef, selectedFile, metadata);
-      console.log('File uploaded to Storage:', snapshot.ref.fullPath);
-      
-      console.log('Getting download URL...');
-      const downloadURL = await getDownloadURL(snapshot.ref);
-      console.log('Got download URL:', downloadURL);
-      
-      console.log('Saving metadata to Firestore...');
-      const billDocRef = await addDoc(collection(db, 'bills'), {
-        userId: user.uid,
-        fileName: fileName,
-        originalName: selectedFile.name,
-        fileUrl: downloadURL,
-        uploadedAt: serverTimestamp(),
-        timestamp: timestamp,
-        fileType: selectedFile.type,
-        fileSize: selectedFile.size,
-        storagePath: storageRef.fullPath
-      });
-      console.log('Saved to Firestore with ID:', billDocRef.id);
-
-      // Update user profile
-      console.log('Updating user profile...');
-      const userProfileRef = doc(db, 'userProfiles', user.uid);
-      await updateDoc(userProfileRef, {
-        bills: arrayUnion({
-          billId: billDocRef.id,
-          fileName: fileName,
-          uploadedAt: timestamp
-        })
-      });
-      console.log('Updated user profile');
-
-      // Update UI
-      console.log('Refreshing bills list...');
-      await Promise.all([
-        fetchUploads(),
-        fetchAnalyzedBills()
-      ]);
-      console.log('Successfully refreshed bills list');
-      
-      // Reset states
-      setSelectedFile(null);
-      setFileName('');
-      setShowNameDialog(false);
-      alert('File uploaded successfully!');
-
+      );
     } catch (error) {
-      console.error('Upload error:', error);
-      alert('Error uploading file: ' + error.message);
-    } finally {
+      console.error('Error in upload process:', error);
+      setUploadError('Failed to process upload: ' + error.message);
       setUploadingFile(false);
     }
   };
 
   const handleDelete = async (billId, storagePath) => {
-    if (!billId) {
-      console.error('No billId provided');
-      return;
-    }
-    if (!storagePath) {
-      console.error('No storagePath provided');
-      return;
-    }
-    if (deletingFile) {
-      console.log('Already deleting a file');
+    if (!confirm('Are you sure you want to delete this bill?')) {
       return;
     }
     
-    if (!confirm('Are you sure you want to delete this bill? This action cannot be undone.')) return;
-    
-    setDeletingFile(true);
     try {
-      console.log('Starting deletion process for:', { billId, storagePath });
+      setDeletingFile(true);
+      console.log('Deleting bill:', billId, 'with storage path:', storagePath);
       
-      // Get the bill data first
-      const billDoc = await getDoc(doc(db, 'bills', billId));
-      if (!billDoc.exists()) {
-        throw new Error('Bill not found in Firestore');
-      }
-      const billData = billDoc.data();
-      console.log('Found bill data:', billData);
-      
-      // Delete all analyses for this bill
-      const analysesRef = collection(db, 'bills', billId, 'analyses');
-      const analysesSnapshot = await getDocs(analysesRef);
-      const deleteAnalysesPromises = analysesSnapshot.docs.map(doc => 
-        deleteDoc(doc.ref)
-      );
-      await Promise.all(deleteAnalysesPromises);
-      console.log('Successfully deleted all analyses');
-      
-      // Delete from Storage
-      const storageRef = ref(storage, storagePath);
-      await deleteObject(storageRef);
-      console.log('Successfully deleted from storage');
-      
-      // Delete from Firestore
+      // Delete from Firestore first
       await deleteDoc(doc(db, 'bills', billId));
-      console.log('Successfully deleted from Firestore');
+      console.log('Deleted from Firestore');
       
-      // Update UI
-      setRecentUploads(prev => prev.filter(upload => upload.id !== billId));
-      setAnalyzedBills(prev => prev.filter(bill => bill.id !== billId));
-      
-      // Update user profile
-      const userProfileRef = doc(db, 'userProfiles', user.uid);
-      const userProfileDoc = await getDoc(userProfileRef);
-      if (userProfileDoc.exists()) {
-        const bills = userProfileDoc.data().bills || [];
-        await updateDoc(userProfileRef, {
-          bills: bills.filter(bill => bill.billId !== billId)
-        });
-        console.log('Successfully updated user profile');
-      }
-      
-      alert('Bill deleted successfully!');
-    } catch (error) {
-      console.error('Delete error:', error);
-      if (error.code === 'storage/object-not-found') {
-        // If storage object is not found, still try to clean up Firestore
+      // Try to delete from Storage if path exists
+      if (storagePath) {
         try {
-          await deleteDoc(doc(db, 'bills', billId));
-          setRecentUploads(prev => prev.filter(upload => upload.id !== billId));
-          setAnalyzedBills(prev => prev.filter(bill => bill.id !== billId));
-          alert('Bill record deleted (file was already removed)');
-        } catch (cleanupError) {
-          console.error('Cleanup error:', cleanupError);
-          alert('Error cleaning up bill record: ' + cleanupError.message);
+          const fileRef = ref(storage, storagePath);
+          await deleteObject(fileRef);
+          console.log('Deleted from Storage');
+        } catch (storageError) {
+          // If storage file doesn't exist, just log and continue
+          console.warn('Storage file delete failed:', storageError.message);
         }
-      } else {
-        alert(`Error deleting bill: ${error.message}. Please try again.`);
       }
+      
+      // Refresh both uploads and analyzed bills to ensure UI consistency
+      console.log('Refreshing uploads and bills...');
+      await Promise.all([
+        fetchUploads(),
+        fetchAnalyzedBills()
+      ]);
+      
+      alert('Bill deleted successfully');
+      
+    } catch (error) {
+      console.error('Error deleting bill:', error);
+      alert('Error deleting bill: ' + error.message);
     } finally {
       setDeletingFile(false);
     }
@@ -530,7 +843,7 @@ export default function Dashboard() {
         });
         
         // Update UI
-        setRecentUploads(prev => prev.map(upload => 
+        setUploads(prev => prev.map(upload => 
           upload.id === uploadId ? { ...upload, fileName: newFileName } : upload
         ));
         setAnalyzedBills(prev => prev.map(bill => 
@@ -743,8 +1056,9 @@ export default function Dashboard() {
               <input
                 type="file"
                 id="fileInput"
+                ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.doc,.docx,.txt"
+                accept=".pdf,.jpg,.jpeg,.png,.heic"
                 style={{ display: 'none' }}
               />
 
@@ -757,8 +1071,8 @@ export default function Dashboard() {
                 color: theme.colors.textPrimary,
                 textAlign: "center",
                 cursor: "pointer",
-                marginTop: "4rem",
-                marginBottom: "4rem",
+                marginTop: "1rem",
+                marginBottom: "1rem",
                 fontSize: "1rem",
                 fontWeight: "600",
                 minHeight: "48px",
@@ -772,10 +1086,51 @@ export default function Dashboard() {
                   justifyContent: "center",
                   gap: "0.5rem"
                 }}>
-                  Select Bill to Upload
+                  {uploadingFile ? 'Uploading...' : 'Select Bill to Upload'}
                   <span style={{ fontSize: "1.2rem" }}>📄</span>
                 </span>
               </label>
+              
+              {uploadError && (
+                <div style={{
+                  backgroundColor: "rgba(239, 68, 68, 0.2)",
+                  color: "rgb(239, 68, 68)",
+                  padding: "0.75rem",
+                  borderRadius: "0.5rem",
+                  marginBottom: "1rem",
+                  fontSize: "0.875rem",
+                  textAlign: "center"
+                }}>
+                  {uploadError}
+                </div>
+              )}
+
+              {uploadingFile && (
+                <div style={{
+                  width: "100%",
+                  height: "0.5rem",
+                  backgroundColor: "rgba(255, 255, 255, 0.1)",
+                  borderRadius: "0.25rem",
+                  marginBottom: "1rem",
+                  overflow: "hidden",
+                  position: "relative"
+                }}>
+                  <div style={{
+                    height: "100%",
+                    width: `${uploadProgress}%`,
+                    backgroundColor: "rgba(79, 70, 229, 0.8)",
+                    transition: "width 0.3s ease"
+                  }}></div>
+                  <div style={{
+                    fontSize: "0.75rem",
+                    color: "rgba(255, 255, 255, 0.7)",
+                    textAlign: "center",
+                    marginTop: "0.5rem"
+                  }}>
+                    {Math.round(uploadProgress)}%
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* File Name Dialog */}
@@ -867,10 +1222,10 @@ export default function Dashboard() {
                 color: theme.colors.textPrimary
               }}>Recent Uploads</h3>
 
-              {recentUploads.length > 0 ? (
+              {uploads.length > 0 ? (
                 <>
                   <div style={{ display: "grid", gap: isMobile ? "0.75rem" : "1rem" }}>
-                    {(showAllUploads ? recentUploads : recentUploads.slice(0, 5)).map((upload, index) => (
+                    {(showAllUploads ? uploads : uploads.slice(0, 5)).map((upload, index) => (
                       <div
                         key={index}
                         style={{
@@ -949,7 +1304,9 @@ export default function Dashboard() {
                             fontSize: "0.8rem",
                             color: theme.colors.textSecondary
                           }}>
-                            {new Date(upload.uploadedAt).toLocaleDateString()}
+                            {upload.uploadDate instanceof Date 
+                              ? upload.uploadDate.toLocaleDateString() 
+                              : 'Processing...'}
                           </div>
                         </div>
                         <div style={{
@@ -1040,7 +1397,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
-                  {recentUploads.length > 5 && (
+                  {uploads.length > 5 && (
                     <div style={{ 
                       textAlign: "center", 
                       marginTop: "1rem",
@@ -1126,7 +1483,7 @@ export default function Dashboard() {
                 }}
               >
                 <option value="">Select a bill to analyze</option>
-                {recentUploads.map((upload, index) => (
+                {uploads.map((upload, index) => (
                   <option key={index} value={upload.id}>
                     {upload.fileName}
                   </option>
@@ -1251,7 +1608,9 @@ export default function Dashboard() {
                                   <circle cx="12" cy="12" r="10" />
                                   <polyline points="12 6 12 12 16 14" />
                                 </svg>
-                                {new Date(bill.analyzedAt).toLocaleDateString()}
+                                {bill.analyzedAt instanceof Date 
+                                  ? bill.analyzedAt.toLocaleDateString() 
+                                  : bill._analyzedTime ? new Date(bill._analyzedTime).toLocaleDateString() : 'Recently analyzed'}
                               </div>
                             </div>
                             <div style={{
@@ -1301,7 +1660,7 @@ export default function Dashboard() {
                                 View
                               </Link>
                               <button
-                                onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
+                                onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill._analyzedTime}_${bill.fileName}`)}
                                 disabled={deletingFile}
                                 style={{
                                   background: "rgba(220, 38, 38, 0.1)",
@@ -1387,10 +1746,8 @@ export default function Dashboard() {
                   }}>
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" y1="13" x2="8" y2="13" />
-                      <line x1="16" y1="17" x2="8" y2="17" />
-                      <polyline points="10 9 9 9 8 9" />
+                      <polyline points="14 2 14 8 21 8" />
+                      <line x1="10" y1="14" x2="21" y2="3"/>
                     </svg>
                     <div>No analyzed bills yet</div>
                     <div style={{ fontSize: "0.8rem", opacity: 0.7 }}>Upload and analyze a bill to get started</div>
@@ -1436,7 +1793,7 @@ export default function Dashboard() {
                 }}
               >
                 <option value="">Select a bill for dispute</option>
-                {recentUploads.map((upload, index) => (
+                {uploads.map((upload, index) => (
                   <option key={index} value={upload.id}>
                     {upload.fileName}
                   </option>

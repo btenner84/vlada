@@ -9,6 +9,27 @@ import {
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import fetch from 'node-fetch';
+import OpenAI from 'openai';
+
+// Initialize Firebase Admin if not already initialized
+if (!getApps().length) {
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    : undefined;
+    
+  initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: privateKey,
+    })
+  });
+}
+
+const db = getFirestore();
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 // Enhanced API handler for document analysis with improved OCR processing
 export default async function handler(req, res) {
@@ -34,107 +55,132 @@ export default async function handler(req, res) {
     console.log('Handling POST request');
     
     try {
-      const { text, mode, instructions, previousResults, fileUrl, userId, billId } = req.body;
+      const { text, mode, systemPrompt, context, options } = req.body;
+      console.log('Request received:', { mode, hasText: !!text, hasSystemPrompt: !!systemPrompt, hasContext: !!context });
       
-      // Direct text analysis mode (from client-side OCR)
-      if (text) {
-        console.log('Processing direct text analysis, length:', text.length);
-        console.log('Analysis mode:', mode || 'extract');
-        
-        try {
-          // Process the text with the LLM
-          const result = await processWithLLM(
-            text, 
-            mode === 'verify', 
-            instructions
-          );
-          
-          // Return results
-          return res.status(200).json({
-            ...result,
-            processingDetails: {
-              method: 'api-direct',
-              timestamp: new Date().toISOString(),
-              mode: mode || 'extract',
-              textLength: text.length,
-              usedPreviousResults: !!previousResults
-            }
-          });
-        } catch (error) {
-          console.error('Text processing error:', error);
-          return res.status(500).json({
-            error: error.message || 'Failed to process text',
-            processingDetails: {
-              method: 'api-direct',
-              error: true,
-              errorType: error.name,
-              textLength: text?.length
-            }
-          });
-        }
+      if (!text) {
+        console.error('Error: No text provided');
+        return res.status(400).json({ error: 'No text provided' });
+      }
+
+      // Prepare messages array for chat completion
+      const messages = [];
+      
+      // Add system message with context if provided
+      if (systemPrompt) {
+        console.log('Using provided system prompt, length:', systemPrompt.length);
+        messages.push({
+          role: 'system',
+          content: systemPrompt
+        });
+      } else {
+        console.log('Using default system prompt');
+        messages.push({
+          role: 'system',
+          content: `You are an expert medical bill analyzer. Extract key information from the provided medical bill text.
+          Focus on patient information, service details, amounts, dates, and insurance information.
+          Return the data in a structured format that can be easily processed.`
+        });
       }
       
-      // Full document analysis mode (OCR + analysis)
-      if (fileUrl && userId && billId) {
-        console.log('Starting full document analysis for:', { fileUrl, billId });
-        
-        // Verify ownership first
-        const billDoc = await adminDb.collection('bills').doc(billId).get();
-        if (!billDoc.exists || billDoc.data().userId !== userId) {
-          console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId });
-          return res.status(403).json({ error: 'Unauthorized access to this document' });
-        }
-        
-        // Retrieve previous analyses if they exist to help improve accuracy
-        const previousAnalyses = await adminDb.collection('bills').doc(billId).collection('analyses').get();
-        let previousAnalysisData = null;
-        
-        if (!previousAnalyses.empty) {
-          const analyses = previousAnalyses.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          
-          // Find the most recent analysis
-          const mostRecent = analyses.sort((a, b) => 
-            (b.analyzedAt?.toDate?.() || 0) - (a.analyzedAt?.toDate?.() || 0)
-          )[0];
-          
-          previousAnalysisData = mostRecent?.extractedData || null;
-          console.log('Found previous analysis:', previousAnalysisData ? 'Yes' : 'No');
-        }
-        
-        // Proceed with full analysis
-        try {
-          const result = await analyzeDocument(fileUrl, userId, billId, previousAnalysisData);
-          return res.status(200).json(result);
-        } catch (error) {
-          console.error('Analysis failed:', error);
-          return res.status(500).json({
-            error: error.message || 'Analysis failed',
-            details: error.toString(),
-            step: 'document_analysis'
-          });
-        }
-      }
-      
-      return res.status(400).json({ 
-        error: 'Missing required parameters',
-        details: { 
-          hasText: !!text, 
-          hasFileUrl: !!fileUrl, 
-          hasUserId: !!userId, 
-          hasBillId: !!billId 
-        } 
+      // Add user message with the text to analyze
+      messages.push({
+        role: 'user',
+        content: `Here is the medical bill text to analyze:\n\n${text}`
       });
       
+      console.log('Prepared messages array with', messages.length, 'messages');
+      
+      try {
+        // Call OpenAI API with better error handling
+        console.log('Calling OpenAI API...');
+        
+        // Determine which model to use
+        const model = options?.model || "gpt-3.5-turbo";
+        console.log('Using model:', model);
+        
+        // Structure the request to OpenAI based on the mode
+        let requestOptions = {
+          model: model,
+          messages: messages,
+          temperature: 0.1, // Low temperature for more consistent results
+          max_tokens: 4000
+        };
+        
+        // If mode is specified, handle it accordingly
+        if (mode === 'contextual_extract') {
+          console.log('Running in contextual extraction mode');
+          // Keep default requestOptions
+        } else if (mode === 'combined_verify_extract') {
+          console.log('Running in combined verification and extraction mode');
+          requestOptions.temperature = 0.2; // Slightly higher temperature for verification component
+          // Messages are already set up with the combined system prompt
+        } else {
+          console.log('Running in standard extraction mode');
+          // Keep default requestOptions
+        }
+        
+        console.log('Request options prepared:', {
+          model: requestOptions.model,
+          temperature: requestOptions.temperature,
+          max_tokens: requestOptions.max_tokens,
+          messages_count: requestOptions.messages.length
+        });
+        
+        const completion = await openai.chat.completions.create(requestOptions);
+        
+        console.log('OpenAI API response received');
+        
+        if (!completion.choices || !completion.choices[0] || !completion.choices[0].message) {
+          console.error('Error: Unexpected response format from OpenAI');
+          return res.status(500).json({ error: 'Unexpected response format from OpenAI' });
+        }
+        
+        const content = completion.choices[0].message.content;
+        console.log('Content received, length:', content.length);
+        
+        try {
+          // Parse the response JSON
+          const parsedResult = JSON.parse(content);
+          console.log('Successfully parsed response JSON');
+          
+          // Return the result
+          return res.status(200).json(parsedResult);
+        } catch (parseError) {
+          console.error('Error parsing OpenAI response JSON:', parseError);
+          
+          // Try to extract valid JSON from the response
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              const extractedJson = JSON.parse(jsonMatch[0]);
+              console.log('Successfully extracted valid JSON from response');
+              return res.status(200).json(extractedJson);
+            } catch (extractError) {
+              console.error('Failed to extract valid JSON:', extractError);
+              return res.status(500).json({ 
+                error: 'Failed to parse response JSON',
+                content: content
+              });
+            }
+          } else {
+            return res.status(500).json({ 
+              error: 'Invalid JSON response from OpenAI',
+              content: content
+            });
+          }
+        }
+      } catch (openaiError) {
+        console.error('OpenAI API error:', openaiError);
+        return res.status(500).json({ 
+          error: 'OpenAI API error',
+          message: openaiError.message,
+          code: openaiError.code || 'unknown'
+        });
+      }
     } catch (error) {
-      console.error('Handler error:', error);
-      return res.status(500).json({
-        error: error.message || 'Analysis failed',
-        details: error.toString(),
-        step: 'request_processing'
-      });
+      console.error('Error in analyze endpoint:', error);
+      return res.status(500).json({ error: error.message || 'Failed to analyze text' });
     }
   } else {
     // Handle any other HTTP method

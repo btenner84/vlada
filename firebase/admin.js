@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { getAuth } from 'firebase-admin/auth';
 
 // Improved private key formatting function for Node.js v22+
 const formatPrivateKey = (key) => {
@@ -84,16 +85,39 @@ function initAdmin() {
 }
 
 // Safely initialize admin services with error handling
-let adminDb, adminStorage;
+let adminDb, adminStorage, adminAuth;
 
 try {
   const app = initAdmin();
   adminDb = getFirestore(app);
   adminStorage = getStorage(app);
+  adminAuth = getAuth(app);
   console.log('Firebase Admin services initialized successfully');
 } catch (error) {
   console.error('Failed to initialize Firebase Admin services:', error.message);
   // Don't throw here - let individual API routes handle the error
 }
 
-export { adminDb, adminStorage }; 
+// Function to get Firebase Admin services
+export function getFirebaseAdmin() {
+  // Re-initialize if necessary
+  if (!adminDb || !adminStorage || !adminAuth) {
+    try {
+      const app = initAdmin();
+      adminDb = getFirestore(app);
+      adminStorage = getStorage(app);
+      adminAuth = getAuth(app);
+    } catch (error) {
+      console.error('Error in getFirebaseAdmin:', error);
+      throw new Error('Firebase Admin services could not be initialized');
+    }
+  }
+  
+  return {
+    db: adminDb,
+    storage: adminStorage,
+    auth: adminAuth
+  };
+}
+
+export { adminDb, adminStorage, adminAuth }; 

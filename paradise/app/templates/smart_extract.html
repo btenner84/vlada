@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Extraction</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        textarea {
+            height: 100px;
+        }
+        button {
+            background: #3498db;
+            color: #fff;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        .preview {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .hidden {
+            display: none;
+        }
+        .screenshot-preview {
+            max-width: 100%;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+        }
+        .error {
+            color: #e74c3c;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Smart Web Extraction</h1>
+        
+        <div id="extraction-form">
+            <div class="form-group">
+                <label for="url">Website URL:</label>
+                <input type="text" id="url" placeholder="https://example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="context">What would you like to extract? (Be specific)</label>
+                <textarea id="context" placeholder="Example: I want to extract all product prices and names from this e-commerce page" required></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="screenshot">Upload a screenshot (optional):</label>
+                <input type="file" id="screenshot" accept="image/*">
+                <img id="screenshot-preview" class="screenshot-preview hidden" alt="Screenshot preview">
+            </div>
+            
+            <button id="analyze-btn">Analyze Website</button>
+            <p id="error-message" class="error hidden"></p>
+        </div>
+        
+        <div id="extraction-result" class="hidden">
+            <h2>Extraction Plan</h2>
+            <div id="extraction-plan" class="preview"></div>
+            
+            <h2>Preview</h2>
+            <div id="extraction-preview" class="preview"></div>
+            
+            <div class="form-group">
+                <button id="confirm-btn">Confirm & Start Monitoring</button>
+                <button id="cancel-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Handle file upload preview
+        document.getElementById('screenshot').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const preview = document.getElementById('screenshot-preview');
+                    preview.src = e.target.result;
+                    preview.classList.remove('hidden');
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Handle form submission
+        document.getElementById('analyze-btn').addEventListener('click', async function() {
+            const url = document.getElementById('url').value;
+            const context = document.getElementById('context').value;
+            const screenshotInput = document.getElementById('screenshot');
+            
+            if (!url || !context) {
+                showError('Please fill in all required fields');
+                return;
+            }
+            
+            // Show loading state
+            this.textContent = 'Analyzing...';
+            this.disabled = true;
+            
+            try {
+                // Prepare request data
+                const requestData = {
+                    url: url,
+                    context: context
+                };
+                
+                // Add screenshot if provided
+                if (screenshotInput.files.length > 0) {
+                    const file = screenshotInput.files[0];
+                    const base64Screenshot = await fileToBase64(file);
+                    requestData.screenshot = base64Screenshot.split(',')[1]; // Remove data URL prefix
+                }
+                
+                // Send request to API
+                const response = await fetch('/api/smart-extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getToken()
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Show extraction result
+                    document.getElementById('extraction-form').classList.add('hidden');
+                    document.getElementById('extraction-result').classList.remove('hidden');
+                    
+                    // Display extraction plan
+                    document.getElementById('extraction-plan').textContent = data.extraction_plan;
+                    
+                    // Display preview
+                    const previewEl = document.getElementById('extraction-preview');
+                    if (data.preview) {
+                        let previewHtml = '';
+                        for (const [key, value] of Object.entries(data.preview)) {
+                            previewHtml += `<strong>${key}:</strong> ${value}<br>`;
+                        }
+                        previewEl.innerHTML = previewHtml;
+                    } else {
+                        previewEl.textContent = 'No preview available';
+                    }
+                    
+                    // Store page ID for confirmation
+                    window.pageId = data.page_id;
+                } else {
+                    showError(data.detail || 'An error occurred');
+                }
+            } catch (error) {
+                showError('An error occurred: ' + error.message);
+            } finally {
+                // Reset button state
+                this.textContent = 'Analyze Website';
+                this.disabled = false;
+            }
+        });
+        
+        // Handle confirmation
+        document.getElementById('confirm-btn').addEventListener('click', async function() {
+            if (!window.pageId) {
+                showError('No extraction plan to confirm');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/smart-extract/confirm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getToken()
+                    },
+                    body: JSON.stringify({
+                        confirmed: true,
+                        page_id: window.pageId
+                    })
+                });
+                
+                if (response.ok) {
+                    // Redirect to the pages list
+                    window.location.href = '/pages';
+                } else {
+                    const data = await response.json();
+                    showError(data.detail || 'An error occurred');
+                }
+            } catch (error) {
+                showError('An error occurred: ' + error.message);
+            }
+        });
+        
+        // Handle cancellation
+        document.getElementById('cancel-btn').addEventListener('click', async function() {
+            if (!window.pageId) {
+                // Just go back to the form
+                document.getElementById('extraction-form').classList.remove('hidden');
+                document.getElementById('extraction-result').classList.add('hidden');
+                return;
+            }
+            
+            try {
+                await fetch('/api/smart-extract/confirm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + getToken()
+                    },
+                    body: JSON.stringify({
+                        confirmed: false,
+                        page_id: window.pageId
+                    })
+                });
+                
+                // Go back to the form regardless of the response
+                document.getElementById('extraction-form').classList.remove('hidden');
+                document.getElementById('extraction-result').classList.add('hidden');
+            } catch (error) {
+                showError('An error occurred: ' + error.message);
+            }
+        });
+        
+        // Helper functions
+        function showError(message) {
+            const errorEl = document.getElementById('error-message');
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+        
+        function getToken() {
+            // In a real app, you would get this from localStorage or a cookie
+            return localStorage.getItem('access_token') || '';
+        }
+        
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+    </script>
+</body>
+</html> 
