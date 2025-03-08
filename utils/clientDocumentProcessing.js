@@ -33,7 +33,7 @@ export async function analyzeDocumentClient(fileUrl, userId = null, billId = nul
       },
       body: JSON.stringify(requestBody)
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
@@ -52,7 +52,7 @@ export async function analyzeDocumentClient(fileUrl, userId = null, billId = nul
     });
 
     // Return a consistent data structure
-    return {
+  return {
       extractedText: result.extractedText,
       extractedData: result.extractedData || {
         patientInfo: {},
@@ -73,9 +73,9 @@ export async function analyzeDocumentClient(fileUrl, userId = null, billId = nul
     return {
       extractedText: "Error processing document",
       extractedData: {
-        patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
-        billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
-        services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
+      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
+      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
+      services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
         insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" }
       },
       confidence: "error",

@@ -7,8 +7,10 @@ import {
   fetchFileBuffer,
   extractTextFromPDF,
   extractTextFromImage,
-  processWithLLM
+  processWithLLM,
+  enhancedAnalyzeWithAI
 } from '../../utils/documentProcessing';
+import { visionClient } from '../../utils/visionClient';
 
 // Initialize Firebase Admin if it hasn't been initialized yet
 let adminDb;
@@ -54,11 +56,6 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
   console.log(`File URL: ${fileUrl}`);
   
   try {
-    // Fetch the file buffer
-    console.log('Fetching file buffer...');
-    const fileBuffer = await fetchFileBuffer(fileUrl);
-    console.log(`File buffer fetched, size: ${fileBuffer.length} bytes`);
-    
     // Detect file type
     console.log('Detecting file type...');
     const fileType = await detectFileType(fileUrl);
@@ -69,9 +66,51 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     let extractedText = '';
     
     if (fileType === 'pdf') {
+      // Fetch the file buffer
+      console.log('Fetching PDF file buffer...');
+      const fileBuffer = await fetchFileBuffer(fileUrl);
+      console.log(`PDF file buffer fetched, size: ${fileBuffer.length} bytes`);
+      
       extractedText = await extractTextFromPDF(fileBuffer);
     } else if (fileType === 'image') {
-      extractedText = await extractTextFromImage(fileBuffer);
+      try {
+        // For images, use the standard approach first
+        console.log('Fetching image file buffer...');
+        const fileBuffer = await fetchFileBuffer(fileUrl);
+        console.log(`Image file buffer fetched, size: ${fileBuffer.length} bytes`);
+        
+        extractedText = await extractTextFromImage(fileBuffer);
+      } catch (imageError) {
+        console.error('Error with standard image extraction, trying fallback method:', imageError);
+        
+        // If standard approach fails, try a different method
+        // This is a workaround for the "DECODER routines::unsupported" error
+        
+        // Create a base64 image directly from the URL
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        
+        // Use a simpler request format for Google Vision API
+        const request = {
+          image: {
+            content: buffer.toString('base64')
+          }
+        };
+        
+        console.log('Using simplified Vision API request format');
+        const [result] = await visionClient.textDetection(request);
+        
+        if (!result || !result.textAnnotations || result.textAnnotations.length === 0) {
+          throw new Error('No text detected in the image');
+        }
+        
+        extractedText = result.textAnnotations[0].description;
+      }
     } else {
       throw new Error(`Unsupported file type: ${fileType}`);
     }
@@ -79,17 +118,30 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     console.log(`Text extracted, length: ${extractedText.length} characters`);
     console.log(`First 100 chars: ${extractedText.substring(0, 100)}`);
     
-    // First verify if it's a medical bill
-    console.log('Verifying if document is a medical bill...');
-    const verificationResult = await processWithLLM(extractedText, true);
-    console.log('Verification result:', verificationResult);
-
+    // Use our enhanced AI analysis
+    console.log('Starting enhanced AI analysis...');
+    const enhancedAnalysisResult = await enhancedAnalyzeWithAI(extractedText);
+    console.log('Enhanced analysis complete:', enhancedAnalysisResult.isMedicalBill ? 'Medical bill detected' : 'Not a medical bill');
+    
+    // For backward compatibility, still do the regular LLM processing if enhanced analysis fails
     let extractedData = null;
-    if (verificationResult.isMedicalBill) {
-      // Then extract data if it is a medical bill
-      console.log('Document is a medical bill, extracting data...');
-      extractedData = await processWithLLM(extractedText, false);
-      console.log('Data extraction complete');
+    if (enhancedAnalysisResult.isMedicalBill && enhancedAnalysisResult.enhancedData) {
+      extractedData = enhancedAnalysisResult.enhancedData;
+      console.log('Using enhanced AI analysis results');
+    } else {
+      // Fallback to the original extraction method
+      console.log('Enhanced analysis unavailable, falling back to standard extraction...');
+      const verificationResult = { 
+        isMedicalBill: enhancedAnalysisResult.isMedicalBill,
+        confidence: enhancedAnalysisResult.confidence,
+        reason: enhancedAnalysisResult.reason 
+      };
+      
+      if (verificationResult.isMedicalBill) {
+        console.log('Document is a medical bill, extracting data using standard method...');
+        extractedData = await processWithLLM(extractedText, false);
+        console.log('Standard data extraction complete');
+      }
     }
     
     // Return the results
@@ -98,9 +150,10 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
       extractedText,
       extractedData,
       fileType,
-      isMedicalBill: verificationResult.isMedicalBill,
-      confidence: verificationResult.confidence,
-      reason: verificationResult.reason
+      isMedicalBill: enhancedAnalysisResult.isMedicalBill,
+      confidence: enhancedAnalysisResult.confidence,
+      reason: enhancedAnalysisResult.reason,
+      enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false
     };
   } catch (error) {
     console.error('Error analyzing document:', error);
@@ -138,6 +191,16 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Check for required environment variables
+    if (!process.env.GOOGLE_CLOUD_CLIENT_EMAIL || 
+        !process.env.GOOGLE_CLOUD_PRIVATE_KEY || 
+        !process.env.GOOGLE_CLOUD_PROJECT_ID) {
+      console.error('Missing required Google Cloud Vision environment variables');
+      return res.status(500).json({ 
+        error: 'Server configuration error: Missing required Google Cloud Vision environment variables' 
+      });
+    }
+    
     // Check if Firebase Admin SDK is initialized
     if (!adminDb || !adminStorage) {
       console.error('Firebase Admin SDK not initialized');

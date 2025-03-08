@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import fetch from 'node-fetch';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
+import { analyzeMedicalBillText } from './openaiClient';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -342,6 +343,67 @@ export async function processWithLLM(text, isVerificationMode = false) {
     error.step = 'llm_processing';
     error.details = error.message;
     throw error;
+  }
+}
+
+export async function enhancedAnalyzeWithAI(extractedText) {
+  console.log('Starting enhanced AI analysis of medical bill...');
+  try {
+    // First verify if it's a medical bill using existing function
+    console.log('Verifying if document is a medical bill...');
+    const verificationResult = await processWithLLM(extractedText, true);
+    console.log('Verification result:', verificationResult);
+
+    if (!verificationResult.isMedicalBill) {
+      console.log('Document is not a medical bill, skipping enhanced analysis');
+      return {
+        isMedicalBill: false,
+        reason: verificationResult.reason,
+        confidence: verificationResult.confidence,
+        enhancedData: null
+      };
+    }
+
+    // If it is a medical bill, perform enhanced analysis with OpenAI
+    console.log('Document is a medical bill, performing enhanced analysis...');
+    const enhancedData = await analyzeMedicalBillText(extractedText);
+    console.log('Enhanced AI analysis complete');
+
+    // Map the enhanced data to our expected format structure
+    const mappedData = {
+      patientInfo: enhancedData.patientInfo || {},
+      billInfo: {
+        totalAmount: enhancedData.billing?.total_cost || enhancedData.billing?.totalCost || "Not found",
+        serviceDates: enhancedData.billing?.date_of_service || enhancedData.billing?.dateOfService || "Not found",
+        dueDate: enhancedData.billing?.due_date || enhancedData.billing?.dueDate || "Not found",
+        facilityName: enhancedData.providerInfo?.name || "Not found"
+      },
+      services: Array.isArray(enhancedData.services) ? enhancedData.services.map(service => ({
+        description: service.description || "Not found",
+        code: service.code || "Not found",
+        amount: service.cost || service.amount || "Not found",
+        details: service.details || "Not found"
+      })) : [{ description: "Not found", code: "Not found", amount: "Not found", details: "Not found" }],
+      insuranceInfo: enhancedData.insurance || {},
+      rawEnhancedData: enhancedData // Include the raw data for debugging
+    };
+
+    return {
+      isMedicalBill: true,
+      confidence: verificationResult.confidence,
+      enhancedData: mappedData
+    };
+  } catch (error) {
+    console.error('Enhanced AI analysis error:', error);
+    error.step = 'enhanced_ai_analysis';
+    error.details = error.message;
+    
+    // Return a partial result with the error
+    return {
+      isMedicalBill: true, // Assume we already verified it before the error
+      error: error.message,
+      enhancedData: null
+    };
   }
 }
 

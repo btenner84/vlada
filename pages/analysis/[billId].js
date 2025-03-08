@@ -79,6 +79,15 @@ const LoadingScreen = ({ progress }) => {
   );
 };
 
+const EnhancedAIBadge = () => (
+  <div className="flex items-center px-2 py-1 text-xs font-medium rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm">
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+    </svg>
+    Enhanced AI
+  </div>
+);
+
 export default function BillAnalysis() {
   const router = useRouter();
   const { billId } = router.query;
@@ -94,12 +103,13 @@ export default function BillAnalysis() {
     loading: false
   });
   const [isMedicalBill, setIsMedicalBill] = useState(null);
+  const [confidence, setConfidence] = useState(0);
   const [error, setError] = useState(null);
   const [processingMethod, setProcessingMethod] = useState(null); // server, client, or fallback
   const [analysisVersion, setAnalysisVersion] = useState(null);
   const [ocrProgress, setOcrProgress] = useState(null);
   const [billQuestion, setBillQuestion] = useState('');
-  const [billAnswer, setBillAnswer] = useState('');
+  const [answerData, setAnswerData] = useState('');
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
 
   // Helper function to clean up patient names
@@ -336,13 +346,23 @@ export default function BillAnalysis() {
           throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
         }
         
-        // Parse the response
         const data = await response.json();
         console.log('API response data:', data);
         
-        // Update the analysis document instead of the bill document
+        if (!data.success) {
+          throw new Error(data.error || 'Failed to process document');
+        }
+        
+        // Set states based on the response
+        setIsMedicalBill(data.isMedicalBill);
+        setConfidence(data.confidence || 0);
+        setAnalysisStatus(data.isMedicalBill ? 'complete' : 'not-medical-bill');
+        
+        // Check if this used enhanced AI analysis
+        const usedEnhancedAnalysis = data.enhancedAnalysis === true;
+        
+        // Save the analysis version to Firestore
         await setDoc(newAnalysisRef, {
-          status: 'analyzed',
           analyzedAt: serverTimestamp(),
           extractedData: {
             ...data.extractedData,
@@ -354,7 +374,8 @@ export default function BillAnalysis() {
           extractedText: data.extractedText,
           isMedicalBill: data.isMedicalBill,
           confidence: data.confidence,
-          processingMethod: 'server',
+          processingMethod: usedEnhancedAnalysis ? 'enhanced-ai' : 'server',
+          usedEnhancedAnalysis: usedEnhancedAnalysis,
           userId: currentUser.uid,
           version: versionNumber
         });
@@ -371,31 +392,64 @@ export default function BillAnalysis() {
           },
           isMedicalBill: data.isMedicalBill,
           confidence: data.confidence,
-          status: 'analyzed'
+          status: 'analyzed',
+          processingMethod: usedEnhancedAnalysis ? 'enhanced-ai' : 'server',
+          usedEnhancedAnalysis: usedEnhancedAnalysis
         });
         
         // Update the state with the new version
         setAnalysisVersion({
           id: versionId,
           ...data,
-          version: versionNumber
+          version: versionNumber,
+          usedEnhancedAnalysis: usedEnhancedAnalysis
         });
         
         console.log('Document updated in Firestore with server-processed data');
-        setProcessingMethod('server');
+        setProcessingMethod(usedEnhancedAnalysis ? 'enhanced-ai' : 'server');
         setRawData({
           extractedText: data.extractedText,
           timestamp: new Date().toISOString()
         });
+        
+        console.log('Extracted data updated:', data.extractedData);
         setExtractedData({
           ...data.extractedData,
-          extractedText: data.extractedText
+          extractedText: data.extractedText,
+          patientInfo: {
+            ...data.extractedData?.patientInfo,
+            fullName: data.extractedData?.patientInfo?.fullName || 
+                      data.extractedData?.patientInfo?.name ||
+                      (data.enhancedAnalysis && data.extractedData?.rawEnhancedData?.patientInfo?.name) || 
+                      '-'
+          }
         });
+
+        // Also add a check to see if we need to clean the patient name
+        if (data.extractedData?.patientInfo?.fullName || data.extractedData?.patientInfo?.name) {
+          console.log('Cleaning patient name...');
+          const nameToClean = data.extractedData?.patientInfo?.fullName || data.extractedData?.patientInfo?.name;
+          const cleanedName = cleanPatientName(nameToClean);
+          console.log(`Original name: "${nameToClean}", Cleaned name: "${cleanedName}"`);
+          
+          // Update with the cleaned name
+          data.extractedData.patientInfo = {
+            ...data.extractedData.patientInfo,
+            fullName: cleanedName
+          };
+        }
+        
         setOcrProgress(null);
 
-        // Clean up the patient name
-        if (data.patientInfo && data.patientInfo.fullName) {
-          data.patientInfo.fullName = cleanPatientName(data.patientInfo.fullName);
+        // If we used enhanced AI, let's generate a better summary right away
+        if (usedEnhancedAnalysis && data.extractedText) {
+          console.log('Enhanced AI analysis complete - data saved successfully');
+          // Removing call to undefined function
+          // try {
+          //   await generateInitialSummary();
+          // } catch (summaryError) {
+          //   console.error('Error generating initial summary:', summaryError);
+          // }
         }
         
         return;
@@ -613,7 +667,7 @@ export default function BillAnalysis() {
     if (!billQuestion.trim()) return;
     
     setIsAskingQuestion(true);
-    setBillAnswer('');
+    setAnswerData('');
     
     try {
       // Prepare comprehensive context from bill data
@@ -643,7 +697,7 @@ export default function BillAnalysis() {
         throw new Error(data.error || 'Failed to get answer');
       }
       
-      setBillAnswer(data.summary);
+      setAnswerData(data.summary);
       
       // Log the successful question and answer
       console.log('Question answered successfully:', {
@@ -669,28 +723,39 @@ export default function BillAnalysis() {
       }
     } catch (error) {
       console.error('Failed to get answer:', error);
-      setBillAnswer('I apologize, but I encountered an error while processing your question. Please try rephrasing your question or ask something else about the bill.');
+      setAnswerData('I apologize, but I encountered an error while processing your question. Please try rephrasing your question or ask something else about the bill.');
     } finally {
       setIsAskingQuestion(false);
     }
   };
 
-  useEffect(() => {
-    const generateInitialSummary = async () => {
-      if (extractedData && !extractedData.summary) {
-        try {
-          const summary = await generateSummary(JSON.stringify(extractedData));
-          setExtractedData(prev => ({
-            ...prev,
-            summary
-          }));
-        } catch (error) {
-          console.error('Failed to generate summary:', error);
-        }
-      }
-    };
+  // Add this function after other similar functions in the component, outside of any useEffect
+  // This should be placed near other component-level functions like generateSummary
 
-    generateInitialSummary();
+  const generateInitialSummary = async () => {
+    if (extractedData && !extractedData.summary) {
+      try {
+        console.log('Generating initial summary for extracted data...');
+        const summary = await generateSummary(JSON.stringify(extractedData));
+        console.log('Summary generated successfully:', summary.substring(0, 50) + '...');
+        setExtractedData(prev => ({
+          ...prev,
+          summary
+        }));
+      } catch (error) {
+        console.error('Failed to generate summary:', error);
+      }
+    } else {
+      console.log('No extracted data available or summary already exists');
+    }
+  };
+
+  // Then modify the useEffect to use this function
+  useEffect(() => {
+    // Call the generateInitialSummary function when extractedData changes
+    if (extractedData) {
+      generateInitialSummary();
+    }
   }, [extractedData]);
 
   // Update the loading state check to only show the loading screen until analysis is complete
@@ -794,6 +859,30 @@ export default function BillAnalysis() {
     );
   }
 
+  // Add this function after other similar functions in the component
+  const ensureAnalyzedAndNavigate = async (e) => {
+    e.preventDefault(); // Prevent default Link behavior
+    
+    try {
+      console.log(`Ensuring bill ${billId} is properly marked as analyzed before navigation...`);
+      
+      // Force a final update to make sure analyzedAt and status fields are set
+      await updateDoc(doc(db, 'bills', billId), {
+        analyzedAt: serverTimestamp(),
+        status: 'analyzed'
+      });
+      
+      console.log(`Successfully updated bill ${billId}. Navigating to dashboard...`);
+      
+      // Use router.push for programmatic navigation
+      router.push('/dashboard');
+    } catch (error) {
+      console.error('Error updating bill before navigation:', error);
+      // Navigate anyway, even if the update fails
+      router.push('/dashboard');
+    }
+  };
+
   return (
     <div style={{
       minHeight: "100vh",
@@ -811,7 +900,7 @@ export default function BillAnalysis() {
         flexWrap: isMobile ? "wrap" : "nowrap",
         gap: isMobile ? "0.5rem" : "0"
       }}>
-        <Link href="/dashboard" style={{
+        <Link href="/dashboard" onClick={ensureAnalyzedAndNavigate} style={{
           display: "flex",
           alignItems: "center",
           gap: "0.5rem",
@@ -877,7 +966,11 @@ export default function BillAnalysis() {
               fontWeight: "600",
               color: "#10B981" 
             }}>
-              {extractedData?.billInfo?.totalAmount || '-'}
+              {extractedData?.billInfo?.totalAmount || 
+               extractedData?.billing?.total_cost || 
+               extractedData?.billing?.totalCost ||
+               extractedData?.rawEnhancedData?.billing?.total_cost ||
+               '-'}
             </div>
           </div>
 
@@ -893,7 +986,11 @@ export default function BillAnalysis() {
           }}>
             <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Date of Service</div>
             <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
-              {extractedData?.billInfo?.serviceDates || '-'}
+              {extractedData?.billInfo?.serviceDates || 
+               extractedData?.billing?.date_of_service || 
+               extractedData?.billing?.dateOfService ||
+               extractedData?.rawEnhancedData?.billing?.date_of_service ||
+               '-'}
             </div>
           </div>
 
@@ -909,7 +1006,11 @@ export default function BillAnalysis() {
           }}>
             <div style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Due Date</div>
             <div style={{ fontSize: "1.5rem", fontWeight: "600" }}>
-              {extractedData?.billInfo?.dueDate || '-'}
+              {extractedData?.billInfo?.dueDate || 
+               extractedData?.billing?.due_date || 
+               extractedData?.billing?.dueDate ||
+               extractedData?.rawEnhancedData?.billing?.due_date ||
+               '-'}
             </div>
           </div>
         </div>
@@ -1005,104 +1106,7 @@ export default function BillAnalysis() {
                 display: "grid",
                 gap: isMobile ? "1.5rem" : "2rem"
               }}>
-                {/* Ask AI Section */}
-                <div style={{
-                  padding: isMobile ? "1rem" : "1.5rem",
-                  background: "#0F172A",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #334155"
-                }}>
-                  <h3 style={{
-                    fontSize: isMobile ? "1.1rem" : "1.25rem",
-                    fontWeight: "600",
-                    marginBottom: isMobile ? "1rem" : "1.5rem",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    flexWrap: isMobile ? "wrap" : "nowrap",
-                    justifyContent: isMobile ? "center" : "flex-start",
-                    textAlign: isMobile ? "center" : "left"
-                  }}>
-                    <span>Ask AI About Your Bill</span>
-                    <span style={{
-                      padding: "0.25rem 0.75rem",
-                      background: "rgba(59, 130, 246, 0.1)",
-                      color: "#3B82F6",
-                      borderRadius: "1rem",
-                      fontSize: "0.875rem",
-                      fontWeight: "500"
-                    }}>Beta</span>
-                  </h3>
-
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1rem"
-                  }}>
-                    <div style={{
-                      display: "flex",
-                      gap: "0.5rem",
-                      flexDirection: isMobile ? "column" : "row",
-                      width: "100%"
-                    }}>
-                      <input
-                        type="text"
-                        value={billQuestion}
-                        onChange={(e) => setBillQuestion(e.target.value)}
-                        placeholder="Ask a question about your bill..."
-                        style={{
-                          flex: 1,
-                          padding: "0.75rem 1rem",
-                          background: "#1E293B",
-                          border: "1px solid #334155",
-                          borderRadius: "0.5rem",
-                          color: "#E2E8F0",
-                          fontSize: "0.875rem",
-                          width: isMobile ? "100%" : "auto"
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault();
-                            handleAskQuestion();
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={handleAskQuestion}
-                        disabled={isAskingQuestion || !billQuestion.trim()}
-                        style={{
-                          padding: "0.75rem 1.5rem",
-                          background: "#3B82F6",
-                          border: "none",
-                          borderRadius: "0.5rem",
-                          color: "white",
-                          fontWeight: "500",
-                          cursor: isAskingQuestion || !billQuestion.trim() ? "not-allowed" : "pointer",
-                          opacity: isAskingQuestion || !billQuestion.trim() ? 0.7 : 1,
-                          width: isMobile ? "100%" : "auto"
-                        }}
-                      >
-                        {isAskingQuestion ? "Thinking..." : "Ask"}
-                      </button>
-                    </div>
-
-                    {billAnswer && (
-                      <div style={{
-                        padding: "1rem",
-                        background: "#1E293B",
-                        borderRadius: "0.5rem",
-                        border: "1px solid #334155",
-                        fontSize: "0.875rem",
-                        lineHeight: "1.5",
-                        whiteSpace: "pre-wrap"
-                      }}>
-                        {billAnswer}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Key Findings */}
+                {/* Key Findings Section */}
                 <div style={{
                   padding: isMobile ? "1rem" : "1.5rem",
                   background: "#0F172A",
@@ -1181,32 +1185,7 @@ export default function BillAnalysis() {
                     gap: "0.75rem",
                     fontSize: "0.875rem"
                   }}>
-                    <div style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "0.75rem",
-                      background: "#1E293B",
-                      borderRadius: "0.5rem",
-                      flexDirection: isMobile ? "column" : "row",
-                      gap: isMobile ? "0.5rem" : "0",
-                      textAlign: isMobile ? "center" : "left"
-                    }}>
-                      <span>Method</span>
-                      <span style={{
-                        padding: "0.25rem 0.75rem",
-                        background: processingMethod === 'server' ? "#059669" : 
-                                   processingMethod === 'client' ? "#F59E0B" : "#6B7280",
-                        color: "white",
-                        borderRadius: "1rem",
-                        fontSize: "0.75rem",
-                        fontWeight: "500"
-                      }}>
-                        {processingMethod === 'server' ? "Server-Side OCR" : 
-                         processingMethod === 'client' ? "Client-Side OCR" : "Fallback Data"}
-                      </span>
-                    </div>
-                    
+                    {/* Analyzed At Section - Keep this */}
                     <div style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -1224,6 +1203,7 @@ export default function BillAnalysis() {
                       </span>
                     </div>
                     
+                    {/* OCR Type Section - New */}
                     <div style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -1235,10 +1215,24 @@ export default function BillAnalysis() {
                       gap: isMobile ? "0.5rem" : "0",
                       textAlign: isMobile ? "center" : "left"
                     }}>
-                      <span>Version</span>
-                      <span>
-                        {analysisVersion?.version || '1.0'}
-                      </span>
+                      <span>OCR Type</span>
+                      <span>Google Vision</span>
+                    </div>
+                    
+                    {/* AI Model Section - New */}
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "0.75rem",
+                      background: "#1E293B",
+                      borderRadius: "0.5rem",
+                      flexDirection: isMobile ? "column" : "row",
+                      gap: isMobile ? "0.5rem" : "0",
+                      textAlign: isMobile ? "center" : "left"
+                    }}>
+                      <span>AI Model Used</span>
+                      <span>GPT-4</span>
                     </div>
                   </div>
                 </div>
@@ -1322,6 +1316,113 @@ export default function BillAnalysis() {
             flexDirection: "column",
             gap: isMobile ? "1.5rem" : "2rem"
           }}>
+            {/* Ask AI About Your Bill - As its own section */}
+            <div style={{
+              padding: isMobile ? "1rem" : "1.5rem",
+              background: "#1E293B",
+              borderRadius: "0.75rem",
+              border: "1px solid #334155"
+            }}>
+              <h3 style={{
+                fontSize: isMobile ? "1.1rem" : "1.25rem",
+                fontWeight: "600",
+                marginBottom: "1rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                textAlign: isMobile ? "center" : "left"
+              }}>
+                <span>Ask AI About Your Bill</span>
+                <span style={{
+                  padding: "0.25rem 0.5rem",
+                  background: "rgba(59, 130, 246, 0.1)",
+                  color: "#3B82F6",
+                  borderRadius: "1rem",
+                  fontSize: "0.75rem",
+                  fontWeight: "500"
+                }}>Beta</span>
+              </h3>
+
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.75rem"
+              }}>
+                <input
+                  type="text"
+                  value={billQuestion}
+                  onChange={(e) => setBillQuestion(e.target.value)}
+                  placeholder="Ask a question about your bill..."
+                  style={{
+                    width: "100%",
+                    padding: "0.75rem",
+                    background: "#0F172A",
+                    border: "1px solid #334155",
+                    borderRadius: "0.5rem",
+                    color: "#E2E8F0",
+                    fontSize: "0.875rem"
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleAskQuestion();
+                    }
+                  }}
+                />
+                <button
+                  onClick={handleAskQuestion}
+                  disabled={!billQuestion.trim() || isAskingQuestion}
+                  style={{
+                    padding: "0.75rem",
+                    background: "#3B82F6",
+                    color: "white",
+                    borderRadius: "0.5rem",
+                    border: "none",
+                    fontSize: "0.875rem",
+                    fontWeight: "500",
+                    cursor: billQuestion.trim() && !isAskingQuestion ? "pointer" : "not-allowed",
+                    opacity: billQuestion.trim() && !isAskingQuestion ? 1 : 0.5,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "0.5rem"
+                  }}
+                >
+                  {isAskingQuestion ? (
+                    <>
+                      <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="12" y1="2" x2="12" y2="6"></line>
+                        <line x1="12" y1="18" x2="12" y2="22"></line>
+                        <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+                        <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+                        <line x1="2" y1="12" x2="6" y2="12"></line>
+                        <line x1="18" y1="12" x2="22" y2="12"></line>
+                        <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+                        <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+                      </svg>
+                      Processing...
+                    </>
+                  ) : "Ask"}
+                </button>
+              </div>
+
+              {answerData && (
+                <div style={{
+                  marginTop: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <p style={{
+                    color: "#E2E8F0",
+                    fontSize: "0.875rem",
+                    lineHeight: "1.5"
+                  }}>{answerData.answer || answerData}</p>
+                </div>
+              )}
+            </div>
+
             {/* Actions */}
             <div style={{
               padding: isMobile ? "1rem" : "1.5rem",
@@ -1378,42 +1479,47 @@ export default function BillAnalysis() {
                     color: "#94A3B8",
                     borderRadius: "0.5rem",
                     border: "1px solid rgba(75, 85, 99, 0.2)",
+                    fontSize: "0.875rem",
+                    fontWeight: "500",
+                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     gap: "0.5rem",
-                    fontWeight: "500",
-                    cursor: "pointer",
-                    justifyContent: isMobile ? "center" : "flex-start",
-                    textAlign: isMobile ? "center" : "left"
+                    justifyContent: isMobile ? "center" : "flex-start"
                   }}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 6 2 18 2 18 9"/>
-                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-                    <rect x="6" y="14" width="12" height="8"/>
+                    <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                    <rect x="6" y="14" width="12" height="8"></rect>
                   </svg>
                   Print Analysis
                 </button>
                 
                 <button
-                  onClick={deleteAnalysis}
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to delete this analysis? This action cannot be undone.')) {
+                      deleteAnalysis();
+                    }
+                  }}
                   style={{
                     padding: "0.75rem",
-                    background: "rgba(239, 68, 68, 0.1)",
+                    background: "rgba(220, 38, 38, 0.1)",
                     color: "#EF4444",
                     borderRadius: "0.5rem",
-                    border: "1px solid rgba(239, 68, 68, 0.2)",
+                    border: "1px solid rgba(220, 38, 38, 0.2)",
+                    fontSize: "0.875rem",
+                    fontWeight: "500",
+                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     gap: "0.5rem",
-                    fontWeight: "500",
-                    cursor: "pointer",
                     justifyContent: isMobile ? "center" : "flex-start",
-                    textAlign: isMobile ? "center" : "left"
+                    marginBottom: "1rem"
                   }}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M3 6h18"/>
                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     <line x1="10" y1="11" x2="10" y2="17"/>
                     <line x1="14" y1="11" x2="14" y2="17"/>
@@ -1447,7 +1553,12 @@ export default function BillAnalysis() {
                   border: "1px solid #334155"
                 }}>
                   <div style={{ color: "#94A3B8" }}>Name</div>
-                  <div>{extractedData?.patientInfo?.fullName || '-'}</div>
+                  <div>
+                    {extractedData?.patientInfo?.fullName || 
+                     extractedData?.patientInfo?.name || 
+                     (extractedData?.rawEnhancedData?.patientInfo?.name) || 
+                     '-'}
+                  </div>
                 </div>
                 <div style={{
                   display: "grid",
@@ -1459,7 +1570,12 @@ export default function BillAnalysis() {
                   border: "1px solid #334155"
                 }}>
                   <div style={{ color: "#94A3B8" }}>DOB</div>
-                  <div>{extractedData?.patientInfo?.dateOfBirth || '-'}</div>
+                  <div>
+                    {extractedData?.patientInfo?.dateOfBirth || 
+                     extractedData?.patientInfo?.dob || 
+                     extractedData?.patientInfo?.date_of_birth ||
+                     '-'}
+                  </div>
                 </div>
                 <div style={{
                   display: "grid",
@@ -1471,7 +1587,12 @@ export default function BillAnalysis() {
                   border: "1px solid #334155"
                 }}>
                   <div style={{ color: "#94A3B8" }}>Account</div>
-                  <div>{extractedData?.patientInfo?.accountNumber || '-'}</div>
+                  <div>
+                    {extractedData?.patientInfo?.accountNumber || 
+                     extractedData?.patientInfo?.account_number || 
+                     extractedData?.patientInfo?.account ||
+                     '-'}
+                  </div>
                 </div>
               </div>
             </div>
