@@ -11,7 +11,7 @@
     }
   ],
   "functions": {
-    "/api/analyze-full": {
+    "api/analyze-full": {
       "maxDuration": 60
     }
   },
