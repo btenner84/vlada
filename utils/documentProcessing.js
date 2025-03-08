@@ -9,13 +9,39 @@ const openai = new OpenAI({
 });
 
 // Initialize Google Cloud Vision client
-const visionClient = new ImageAnnotatorClient({
-  credentials: {
-    client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
-    private_key: process.env.GOOGLE_CLOUD_PRIVATE_KEY,
-    project_id: process.env.GOOGLE_CLOUD_PROJECT_ID
-  }
-});
+let visionClient;
+
+// Strictly require environment variables for Google Cloud Vision
+if (!process.env.GOOGLE_CLOUD_CLIENT_EMAIL) {
+  console.error('Missing required environment variable: GOOGLE_CLOUD_CLIENT_EMAIL');
+}
+if (!process.env.GOOGLE_CLOUD_PRIVATE_KEY) {
+  console.error('Missing required environment variable: GOOGLE_CLOUD_PRIVATE_KEY');
+}
+if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+  console.error('Missing required environment variable: GOOGLE_CLOUD_PROJECT_ID');
+}
+
+try {
+  // Format the private key correctly (replace escaped newlines with actual newlines)
+  const privateKey = process.env.GOOGLE_CLOUD_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  
+  console.log('Initializing Google Cloud Vision client with environment variables');
+  console.log('Project ID:', process.env.GOOGLE_CLOUD_PROJECT_ID);
+  console.log('Client Email:', process.env.GOOGLE_CLOUD_CLIENT_EMAIL);
+  
+  visionClient = new ImageAnnotatorClient({
+    credentials: {
+      client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+      private_key: privateKey,
+      project_id: process.env.GOOGLE_CLOUD_PROJECT_ID
+    }
+  });
+  
+  console.log('Google Cloud Vision client initialized successfully');
+} catch (error) {
+  console.error('Error initializing Google Cloud Vision client:', error);
+}
 
 // Add image pre-processing functions
 async function preprocessImage(imageBuffer) {
@@ -63,34 +89,47 @@ export async function extractTextFromImage(imageBuffer) {
   console.log('Starting text extraction process with Google Vision API...');
   
   try {
+    // Check if Vision client is initialized
+    if (!visionClient) {
+      throw new Error('Google Cloud Vision client is not initialized. Please set the required environment variables: GOOGLE_CLOUD_CLIENT_EMAIL, GOOGLE_CLOUD_PRIVATE_KEY, and GOOGLE_CLOUD_PROJECT_ID.');
+    }
+    
     // Pre-process the image
     console.log('Pre-processing image for OCR...');
     const processedBuffer = await preprocessImage(imageBuffer);
     console.log('Image pre-processing complete');
     
-    // Create request for Google Vision API
+    // Create request for Google Vision API using annotateImage method
     const request = {
-      image: {
-        content: processedBuffer.toString('base64')
-      },
-      features: [
+      requests: [
         {
-          type: 'TEXT_DETECTION'
+          image: {
+            content: processedBuffer.toString('base64')
+          },
+          features: [
+            {
+              type: 'TEXT_DETECTION'
+            }
+          ]
         }
       ]
     };
     
     console.log('Sending request to Google Vision API...');
-    const [result] = await visionClient.textDetection(request);
-    const detections = result.textAnnotations;
+    const [response] = await visionClient.batchAnnotateImages(request);
     
-    if (!detections || detections.length === 0) {
-      console.log('No text detected in the image');
-      return '';
+    if (!response || !response.responses || response.responses.length === 0) {
+      throw new Error('Empty response from Google Vision API');
+    }
+    
+    const textAnnotations = response.responses[0]?.textAnnotations;
+    
+    if (!textAnnotations || textAnnotations.length === 0) {
+      throw new Error('No text detected in the image');
     }
     
     // The first annotation contains the entire extracted text
-    const extractedText = detections[0].description;
+    const extractedText = textAnnotations[0].description;
     
     // Post-process the extracted text
     const processedText = extractedText
