@@ -1,11 +1,20 @@
 import pdf from 'pdf-parse';
 import OpenAI from 'openai';
 import fetch from 'node-fetch';
-import { getWorker, terminateWorker } from './tesseractWorker';
 import sharp from 'sharp';
+import { ImageAnnotatorClient } from '@google-cloud/vision';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
+});
+
+// Initialize Google Cloud Vision client
+const visionClient = new ImageAnnotatorClient({
+  credentials: {
+    client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_CLOUD_PRIVATE_KEY,
+    project_id: process.env.GOOGLE_CLOUD_PROJECT_ID
+  }
 });
 
 // Add image pre-processing functions
@@ -51,8 +60,7 @@ export async function extractTextFromPDF(pdfBuffer) {
 }
 
 export async function extractTextFromImage(imageBuffer) {
-  console.log('Starting text extraction process...');
-  let worker = null;
+  console.log('Starting text extraction process with Google Vision API...');
   
   try {
     // Pre-process the image
@@ -60,23 +68,32 @@ export async function extractTextFromImage(imageBuffer) {
     const processedBuffer = await preprocessImage(imageBuffer);
     console.log('Image pre-processing complete');
     
-    worker = await getWorker();
-    console.log('Got Tesseract worker');
+    // Create request for Google Vision API
+    const request = {
+      image: {
+        content: processedBuffer.toString('base64')
+      },
+      features: [
+        {
+          type: 'TEXT_DETECTION'
+        }
+      ]
+    };
     
-    // Convert processed buffer to base64
-    const base64Image = processedBuffer.toString('base64');
+    console.log('Sending request to Google Vision API...');
+    const [result] = await visionClient.textDetection(request);
+    const detections = result.textAnnotations;
     
-    // Recognize text from base64
-    console.log('Starting OCR recognition...');
-    const { data: { text, confidence } } = await worker.recognize(`data:image/png;base64,${base64Image}`);
-    console.log('OCR recognition completed with confidence:', confidence);
-
-    if (!text || text.trim().length === 0) {
-      throw new Error('No text was extracted from the image');
+    if (!detections || detections.length === 0) {
+      console.log('No text detected in the image');
+      return '';
     }
-
+    
+    // The first annotation contains the entire extracted text
+    const extractedText = detections[0].description;
+    
     // Post-process the extracted text
-    const processedText = text
+    const processedText = extractedText
       .replace(/\s+/g, ' ') // Normalize whitespace
       .replace(/[^\x20-\x7E\n]/g, '') // Remove non-printable characters
       .trim();
@@ -88,14 +105,6 @@ export async function extractTextFromImage(imageBuffer) {
   } catch (error) {
     console.error('Text extraction error:', error);
     throw new Error(`Text extraction failed: ${error.message}`);
-  } finally {
-    if (worker) {
-      try {
-        await terminateWorker();
-      } catch (error) {
-        console.error('Error terminating worker:', error);
-      }
-    }
   }
 }
 
