@@ -10,6 +10,11 @@
       ]
     }
   ],
+  "functions": {
+    "api/analyze-full.js": {
+      "maxDuration": 60
+    }
+  },
   "rewrites": [],
   "redirects": [],
   "cleanUrls": true,
