@@ -17,7 +17,7 @@ const nextConfig = {
     return config;
   },
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch']
+    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch', '@google-cloud/vision']
   },
   images: {
     domains: ['firebasestorage.googleapis.com']
