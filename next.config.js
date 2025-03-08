@@ -17,7 +17,7 @@ const nextConfig = {
     return config;
   },
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse', 'tesseract.js', 'node-fetch']
+    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch']
   },
   images: {
     domains: ['firebasestorage.googleapis.com']

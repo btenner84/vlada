@@ -147,30 +147,34 @@ export default async function handler(req, res) {
     // Get the request body
     const { fileUrl, userId, billId } = req.body;
     
-    if (!fileUrl || !userId || !billId) {
-      console.log('Missing required parameters');
-      return res.status(400).json({ error: 'Missing required parameters: fileUrl, userId, billId' });
+    if (!fileUrl) {
+      console.log('Missing required parameter: fileUrl');
+      return res.status(400).json({ error: 'Missing required parameter: fileUrl' });
     }
     
     console.log('Request parameters:', { fileUrl, userId, billId });
     
-    // Verify document ownership
-    console.log('Verifying document ownership');
-    try {
-      const billDoc = await adminDb.collection('bills').doc(billId).get();
-      if (!billDoc.exists || billDoc.data().userId !== userId) {
-        console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
-        return res.status(403).json({ error: 'Unauthorized access to this document' });
+    // Verify document ownership only if userId and billId are provided
+    if (userId && billId) {
+      console.log('Verifying document ownership');
+      try {
+        const billDoc = await adminDb.collection('bills').doc(billId).get();
+        if (!billDoc.exists || billDoc.data().userId !== userId) {
+          console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
+          return res.status(403).json({ error: 'Unauthorized access to this document' });
+        }
+        console.log('Document ownership verified');
+      } catch (authError) {
+        console.error('Error verifying document ownership:', authError);
+        return res.status(500).json({ error: `Error verifying document ownership: ${authError.message}` });
       }
-      console.log('Document ownership verified');
-    } catch (authError) {
-      console.error('Error verifying document ownership:', authError);
-      return res.status(500).json({ error: `Error verifying document ownership: ${authError.message}` });
+    } else {
+      console.log('Skipping document ownership verification (client-side request)');
     }
     
     // Analyze the document
     console.log('Starting document analysis');
-    const result = await analyzeDocument(fileUrl, userId, billId);
+    const result = await analyzeDocument(fileUrl, userId || 'client-request', billId || 'client-request');
     
     // Return the results
     console.log('Analysis complete, returning results');

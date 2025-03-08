@@ -291,49 +291,23 @@ export async function detectFileTypeClient(fileUrl) {
   console.log('Detecting file type for URL:', fileUrl);
   
   try {
-    // Use our proxy endpoint instead of direct Firebase URL
-    const proxyUrl = convertToProxyUrl(fileUrl);
-    console.log('Using proxy URL for file type detection:', proxyUrl);
+    const response = await fetch(fileUrl, { method: 'HEAD' });
+    const contentType = response.headers.get('content-type');
     
-    // Try to determine the file type from the headers
-    console.log('Sending HEAD request to determine file type...');
-    const response = await fetch(proxyUrl, { method: 'HEAD' });
-    
-    if (response.ok) {
-      const contentType = response.headers.get('content-type');
-      console.log('Content-Type from headers:', contentType);
-      
-      if (contentType) {
-        if (contentType.includes('application/pdf')) {
-          console.log('File type detected from headers: PDF');
-          return 'pdf';
-        } else if (contentType.includes('image/')) {
-          console.log('File type detected from headers: Image');
-          return 'image';
-        }
-      }
+    if (contentType.includes('pdf')) {
+      console.log('File type detected from headers: PDF');
+      return 'pdf';
+    } else if (contentType.includes('image')) {
+      console.log('File type detected from headers: Image');
+      return 'image';
+    } else {
+      console.log('Unknown file type from headers:', contentType);
+      return 'unknown';
     }
   } catch (error) {
-    console.log('HEAD request failed, falling back to extension-based detection:', error);
+    console.error('File type detection error:', error);
+    return 'unknown';
   }
-  
-  // Fallback to extension-based detection
-  console.log('Could not determine file type from headers, guessing based on URL');
-  const url = new URL(fileUrl);
-  const path = url.pathname;
-  const extension = path.split('.').pop().toLowerCase();
-  
-  if (extension === 'pdf') {
-    console.log('File type detected from extension: PDF');
-    return 'pdf';
-  } else if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'tif'].includes(extension)) {
-    console.log('File type detected from extension: Image');
-    return 'image';
-  }
-  
-  // If we can't determine the type, default to image
-  console.log('Could not determine file type, defaulting to: Image');
-  return 'image';
 }
 
 // Helper function to convert Firebase Storage URLs to our proxy endpoint
@@ -620,91 +594,90 @@ export async function processWithClientLLM(text, isVerificationMode = false) {
   }
 }
 
-export async function analyzeDocumentClient(fileUrl, progressHandler = null) {
-  console.log('Starting client-side document analysis...', { fileUrl });
-  
+/**
+ * Analyzes a document using the server-side API
+ * @param {string} fileUrl - URL of the file to analyze
+ * @param {string|null} userId - Optional user ID for authenticated requests
+ * @param {string|null} billId - Optional bill ID for authenticated requests
+ * @returns {Promise<Object>} - Analysis results
+ */
+export async function analyzeDocumentClient(fileUrl, userId = null, billId = null) {
   try {
-    // Detect the file type
-    const fileType = await detectFileTypeClient(fileUrl);
+    console.log('Starting document analysis via server API...', { fileUrl, userId, billId });
     
-    // Extract text based on file type
-    console.log('Starting client-side text extraction process...');
-    let extractedText = '';
+    // Get the current origin for API calls
+    const origin = window.location.origin;
+    const apiUrl = `${origin}/api/analyze-full`;
     
-    if (fileType === 'pdf') {
-      extractedText = await extractTextFromPDFClient(fileUrl, progressHandler);
-    } else if (fileType === 'image') {
-      extractedText = await extractTextFromImageClient(fileUrl, progressHandler);
-    } else {
-      throw new Error(`Unsupported file type: ${fileType}`);
-    }
+    // Prepare the request body
+    const requestBody = {
+      fileUrl,
+      userId,
+      billId
+    };
     
-    if (!extractedText || extractedText.trim().length === 0) {
-      console.warn('Extracted text is empty or whitespace only');
-      extractedText = 'No text could be extracted from the document.';
-    }
+    console.log('Sending request to server API:', apiUrl);
     
-    // Process the extracted text with the LLM
-    console.log('Processing extracted text with LLM...');
-    console.log('Extracted text length:', extractedText.length);
-    console.log('First 100 chars of extracted text:', extractedText.substring(0, 100));
-    
-    // First verify if it's a medical bill
-    console.log('Verifying if document is a medical bill...');
-    const verificationResult = await processWithClientLLM(extractedText, true);
-    
-    if (!verificationResult.isMedicalBill) {
-      console.warn('Document does not appear to be a medical bill:', verificationResult.reason);
-      // Still proceed with extraction but log the warning
-    }
-    
-    // Process the extracted text for data extraction
-    console.log('Extracting data from document...');
-    const result = await processWithClientLLM(extractedText, false);
-    
-    // Add verification results to the extraction result
-    result.isMedicalBill = verificationResult.isMedicalBill;
-    result.confidence = verificationResult.confidence;
-    result.verificationReason = verificationResult.reason;
-    
-    // Add the extracted text to the result if not already present
-    if (!result.extractedText) {
-      result.extractedText = extractedText;
-    }
-    
-    // Add processing metadata
-    result.fileType = fileType;
-    result.processingTimestamp = new Date().toISOString();
-    
-    console.log('Document analysis complete:', { 
-      textLength: extractedText.length,
-      isMedicalBill: result.isMedicalBill,
-      confidence: result.confidence,
-      processingMethod: result.processingMethod || 'client',
-      resultSummary: {
-        hasPatientInfo: !!result.patientInfo,
-        hasBillInfo: !!result.billInfo,
-        servicesCount: result.services?.length || 0,
-        hasInsuranceInfo: !!result.insuranceInfo
-      }
+    // Call the server endpoint
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
     });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
     
-    return result;
+    if (!result.success) {
+      throw new Error(result.error || 'Server processing failed');
+    }
+
+    console.log('Server API returned successful result:', {
+      textLength: result.extractedText?.length,
+      isMedicalBill: result.isMedicalBill,
+      confidence: result.confidence
+    });
+
+    // Return a consistent data structure
+    return {
+      extractedText: result.extractedText,
+      extractedData: result.extractedData || {
+        patientInfo: {},
+        billInfo: {},
+        services: [],
+        insuranceInfo: {}
+      },
+      confidence: result.confidence,
+      processingMethod: 'server',
+      isMedicalBill: result.isMedicalBill || false,
+      processingTimestamp: new Date().toISOString(),
+      status: 'analyzed',
+      fileType: result.fileType
+    };
   } catch (error) {
     console.error('Document analysis error:', error);
-    
-    // Return a valid structure even on error
+    // Return error structure
     return {
-      patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
-      billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
-      services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
-      insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" },
-      isMedicalBill: false,
+      extractedText: "Error processing document",
+      extractedData: {
+        patientInfo: { fullName: "Error", dateOfBirth: "Error", accountNumber: "Error", insuranceInfo: "Error" },
+        billInfo: { totalAmount: "Error", serviceDates: "Error", dueDate: "Error", facilityName: "Error" },
+        services: [{ description: "Error", code: "Error", amount: "Error", details: "Error" }],
+        insuranceInfo: { amountCovered: "Error", patientResponsibility: "Error", adjustments: "Error" }
+      },
       confidence: "error",
-      extractedText: "Error processing document: " + error.message,
       processingMethod: 'error',
+      isMedicalBill: false,
+      processingTimestamp: new Date().toISOString(),
+      status: 'error',
       error: error.message,
-      processingTimestamp: new Date().toISOString()
+      fileType: 'unknown'
     };
   }
 } 
