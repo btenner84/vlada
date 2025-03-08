@@ -83,10 +83,10 @@ const EnhancedAIBadge = () => (
   <div className="flex items-center px-2 py-1 text-xs font-medium rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm">
     <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 mr-1" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
-    </svg>
+            </svg>
     Enhanced AI
-  </div>
-);
+    </div>
+  );
 
 export default function BillAnalysis() {
   const router = useRouter();
@@ -550,12 +550,12 @@ export default function BillAnalysis() {
           
           // Set dummy extracted data
           const dummyData = {
-            patientInfo: {
+                patientInfo: {
               name: "Sample Patient",
               dob: "01/01/1980",
               address: "123 Main St, Anytown, USA"
-            },
-            billInfo: {
+                },
+                billInfo: {
               provider: "Sample Medical Center",
               date: "01/15/2023",
               totalAmount: "$1,234.56"
@@ -742,7 +742,7 @@ export default function BillAnalysis() {
           ...prev,
           summary
         }));
-      } catch (error) {
+    } catch (error) {
         console.error('Failed to generate summary:', error);
       }
     } else {
@@ -901,12 +901,12 @@ export default function BillAnalysis() {
         gap: isMobile ? "0.5rem" : "0"
       }}>
         <Link href="/dashboard" onClick={ensureAnalyzedAndNavigate} style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.5rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
           color: theme.colors.textPrimary,
-          textDecoration: "none",
-          transition: "color 0.2s",
+            textDecoration: "none",
+            transition: "color 0.2s",
           fontSize: isMobile ? "1rem" : "1.25rem"
         }}>
           <span style={{
@@ -1108,66 +1108,267 @@ export default function BillAnalysis() {
               }}>
                 {/* Key Findings Section */}
                 <div style={{
-                  padding: isMobile ? "1rem" : "1.5rem",
-                  background: "#0F172A",
-                  borderRadius: "0.75rem",
-                  border: "1px solid #334155"
+                  padding: isMobile ? "1.5rem" : "2rem",
+                  background: "linear-gradient(145deg, #0F172A 0%, #1E293B 100%)",
+                  borderRadius: "1rem",
+                  border: "1px solid #334155",
+                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)",
+                  position: "relative",
+                  overflow: "hidden"
                 }}>
-                  <h3 style={{
-                    fontSize: isMobile ? "1.1rem" : "1.125rem",
-                    fontWeight: "600",
-                    marginBottom: "1rem",
-                    textAlign: isMobile ? "center" : "left"
-                  }}>Key Findings</h3>
+                  {/* Decorative elements */}
                   <div style={{
-                    display: "grid",
-                    gap: "1rem"
-                  }}>
+                    position: "absolute",
+                    top: "-20px",
+                    right: "-20px",
+                    width: "120px",
+                    height: "120px",
+                    background: "radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0) 70%)",
+                    borderRadius: "50%",
+                    zIndex: "0"
+                  }}></div>
+                  <div style={{
+                    position: "absolute",
+                    bottom: "-30px",
+                    left: "-30px",
+                    width: "150px",
+                    height: "150px",
+                    background: "radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0) 70%)",
+                    borderRadius: "50%",
+                    zIndex: "0"
+                  }}></div>
+                  
+                  <div style={{ position: "relative", zIndex: "1" }}>
                     <div style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: "0.75rem",
-                      padding: "0.75rem",
-                      background: "rgba(16, 185, 129, 0.1)",
-                      borderRadius: "0.5rem",
-                      border: "1px solid rgba(16, 185, 129, 0.2)",
-                      justifyContent: isMobile ? "center" : "flex-start"
-                    }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      justifyContent: "space-between",
+                      marginBottom: "1.5rem"
+                }}>
+                  <h3 style={{
+                        fontSize: isMobile ? "1.3rem" : "1.5rem",
+                    fontWeight: "700",
+                        background: "linear-gradient(90deg, #3B82F6 0%, #10B981 100%)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                    textAlign: isMobile ? "center" : "left",
+                        flex: "1"
+                  }}>Key Findings</h3>
+                      
+                  <div style={{
+                        background: "rgba(16, 185, 129, 0.1)",
+                        borderRadius: "2rem",
+                        padding: "0.4rem 0.8rem",
+                        border: "1px solid rgba(16, 185, 129, 0.3)",
+                      display: "flex",
+                      alignItems: "center",
+                        gap: "0.5rem"
+                      }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                         <polyline points="22 4 12 14.01 9 11.01"/>
                       </svg>
-                      <span style={{ color: "#10B981" }}>{extractedData?.services?.length || 0} Billable Services Identified</span>
-                    </div>
-                    {extractedData?.services?.map((service, index) => (
-                      <div key={index} style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "0.75rem",
-                        background: "rgba(59, 130, 246, 0.1)",
-                        borderRadius: "0.5rem",
-                        border: "1px solid rgba(59, 130, 246, 0.2)",
-                        flexDirection: isMobile ? "column" : "row",
-                        gap: isMobile ? "0.5rem" : "0"
-                      }}>
-                        <span style={{ 
-                          color: "#3B82F6",
-                          textAlign: isMobile ? "center" : "left",
-                          marginBottom: isMobile ? "0.25rem" : "0"
-                        }}>{service.description}</span>
-                        <span style={{ 
-                          color: "#3B82F6", 
-                          fontWeight: "600",
-                          textAlign: isMobile ? "center" : "right"
-                        }}>{service.amount}</span>
+                        <span style={{ color: "#10B981", fontWeight: "600", fontSize: "0.9rem" }}>
+                          {extractedData?.services?.length || 0} Services
+                        </span>
                       </div>
-                    ))}
+                    </div>
+                    
+                    <div style={{
+                      display: "grid",
+                      gap: "1.25rem"
+                    }}>
+                      {extractedData?.services?.map((service, index) => (
+                        <div key={index} style={{
+                          background: "rgba(15, 23, 42, 0.7)",
+                          backdropFilter: "blur(10px)",
+                          borderRadius: "0.75rem",
+                          border: "1px solid rgba(59, 130, 246, 0.3)",
+                          padding: "1.25rem",
+                          transition: "all 0.3s ease",
+                          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
+                          position: "relative",
+                          overflow: "hidden"
+                        }}>
+                          {/* Price tag decoration */}
+                          <div style={{
+                            position: "absolute",
+                            top: "0",
+                            right: "0",
+                            background: "rgba(59, 130, 246, 0.2)",
+                            padding: "0.25rem 0.75rem",
+                            borderBottomLeftRadius: "0.5rem",
+                            borderTopRightRadius: "0.5rem",
+                            fontSize: "0.75rem",
+                            color: "#3B82F6",
+                            fontWeight: "600"
+                          }}>
+                            BILLED AMOUNT
+                          </div>
+                          
+                          <div style={{
+                          display: "flex",
+                            flexDirection: "column",
+                            gap: "1rem"
+                          }}>
+                            {/* Service name and code */}
+                            <div style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "0.5rem"
+                            }}>
+                              <div style={{
+                                fontSize: isMobile ? "1.1rem" : "1.25rem",
+                                fontWeight: "600",
+                                color: "#F1F5F9",
+                              }}>
+                                {service.description}
+                              </div>
+                              
+                              {service.code && (
+                                <div style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                          background: "rgba(59, 130, 246, 0.1)",
+                          borderRadius: "0.5rem",
+                                  padding: "0.3rem 0.6rem",
+                                  width: "fit-content"
+                                }}>
+                                  <span style={{
+                                    fontSize: "0.8rem",
+                                    fontWeight: "500",
+                                    color: "#3B82F6",
+                                    fontFamily: "monospace"
+                                  }}>
+                                    CODE: {service.code}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Price comparison section */}
+                            <div style={{
+                              display: "flex",
+                          flexDirection: isMobile ? "column" : "row",
+                              gap: isMobile ? "1rem" : "0",
+                              alignItems: "stretch",
+                              background: "rgba(15, 23, 42, 0.5)",
+                              borderRadius: "0.75rem",
+                              padding: "1rem",
+                              border: "1px solid rgba(59, 130, 246, 0.15)"
+                            }}>
+                              {/* Billed amount */}
+                              <div style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.5rem",
+                                flex: "1",
+                                padding: isMobile ? "0" : "0 1rem",
+                                borderRight: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)"
+                        }}>
+                          <span style={{ 
+                                  fontSize: "0.75rem",
+                                  color: "#94A3B8",
+                                  fontWeight: "500",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.05em"
+                                }}>
+                                  Billed
+                              </span>
+                          <span style={{ 
+                                  fontSize: isMobile ? "1.25rem" : "1.5rem",
+                                fontWeight: "700",
+                                  color: "#3B82F6",
+                              }}>
+                                  {service.amount}
+                              </span>
+                            </div>
+                            
+                              {/* Reasonable price */}
+                            <div style={{
+                              display: "flex",
+                                flexDirection: "column",
+                              gap: "0.5rem",
+                                flex: "1",
+                                padding: isMobile ? "0" : "0 1rem",
+                                borderRight: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)",
+                                borderTop: isMobile ? "1px solid rgba(59, 130, 246, 0.15)" : "none",
+                                paddingTop: isMobile ? "1rem" : "0",
+                                marginTop: isMobile ? "0.5rem" : "0"
+                            }}>
+                              <span style={{ 
+                                  fontSize: "0.75rem",
+                                color: "#94A3B8", 
+                                  fontWeight: "500",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.05em"
+                                }}>
+                                  Reasonable Price
+                                </span>
+                              <span style={{ 
+                                  fontSize: isMobile ? "1.25rem" : "1.5rem",
+                                  fontWeight: "700",
+                                  color: "#10B981",
+                                }}>
+                                  {/* Placeholder for reasonable price - will be replaced with actual data */}
+                                  {service.description.includes("Check Up") ? "$150.00" : "$300.00"}
+                              </span>
+                              </div>
+                              
+                              {/* Overcharge indicator */}
+                              <div style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.5rem",
+                                flex: "1",
+                                padding: isMobile ? "0" : "0 1rem",
+                                borderTop: isMobile ? "1px solid rgba(59, 130, 246, 0.15)" : "none",
+                                paddingTop: isMobile ? "1rem" : "0",
+                                marginTop: isMobile ? "0.5rem" : "0"
+                              }}>
+                              <span style={{
+                                fontSize: "0.75rem",
+                                  color: "#94A3B8",
+                                fontWeight: "500",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.05em"
+                                }}>
+                                  Assessment
+                                </span>
+                                <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                  gap: "0.5rem",
+                                  background: "rgba(239, 68, 68, 0.1)",
+                                  padding: "0.4rem 0.75rem",
+                                  borderRadius: "0.5rem",
+                                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                                  width: "fit-content"
+                                }}>
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <circle cx="12" cy="12" r="10"></circle>
+                                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                    </svg>
+                                  <span style={{
+                                    fontSize: "0.85rem",
+                                    fontWeight: "600",
+                                    color: "#EF4444"
+                                  }}>
+                                    Likely Overcharged
+                              </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-
+                            </div>
+                            
                 {/* Processing Details */}
-                <div style={{
+                              <div style={{
                   padding: isMobile ? "1rem" : "1.5rem",
                   background: "#0F172A",
                   borderRadius: "0.75rem",
@@ -1201,13 +1402,13 @@ export default function BillAnalysis() {
                       <span>
                         {analysisVersion?.analyzedAt?.toDate?.().toLocaleString() || 'N/A'}
                       </span>
-                    </div>
-                    
+                              </div>
+                            
                     {/* OCR Type Section - New */}
-                    <div style={{
-                      display: "flex",
+                            <div style={{
+                              display: "flex",
                       justifyContent: "space-between",
-                      alignItems: "center",
+                              alignItems: "center",
                       padding: "0.75rem",
                       background: "#1E293B",
                       borderRadius: "0.5rem",
@@ -1217,23 +1418,23 @@ export default function BillAnalysis() {
                     }}>
                       <span>OCR Type</span>
                       <span>Google Vision</span>
-                    </div>
+                            </div>
                     
                     {/* AI Model Section - New */}
-                    <div style={{
+                      <div style={{
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      padding: "0.75rem",
+                        padding: "0.75rem",
                       background: "#1E293B",
-                      borderRadius: "0.5rem",
+                        borderRadius: "0.5rem",
                       flexDirection: isMobile ? "column" : "row",
                       gap: isMobile ? "0.5rem" : "0",
                       textAlign: isMobile ? "center" : "left"
                     }}>
                       <span>AI Model Used</span>
                       <span>GPT-4</span>
-                    </div>
+                      </div>
                   </div>
                 </div>
               </div>
@@ -1347,39 +1548,39 @@ export default function BillAnalysis() {
                 display: "flex",
                 flexDirection: "column",
                 gap: "0.75rem"
-              }}>
-                <input
-                  type="text"
-                  value={billQuestion}
-                  onChange={(e) => setBillQuestion(e.target.value)}
-                  placeholder="Ask a question about your bill..."
-                  style={{
-                    width: "100%",
+                }}>
+                  <input
+                    type="text"
+                    value={billQuestion}
+                    onChange={(e) => setBillQuestion(e.target.value)}
+                    placeholder="Ask a question about your bill..."
+                    style={{
+                      width: "100%",
                     padding: "0.75rem",
-                    background: "#0F172A",
-                    border: "1px solid #334155",
-                    borderRadius: "0.5rem",
-                    color: "#E2E8F0",
-                    fontSize: "0.875rem"
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleAskQuestion();
-                    }
-                  }}
-                />
-                <button
-                  onClick={handleAskQuestion}
+                      background: "#0F172A",
+                      border: "1px solid #334155",
+                      borderRadius: "0.5rem",
+                      color: "#E2E8F0",
+                      fontSize: "0.875rem"
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleAskQuestion();
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={handleAskQuestion}
                   disabled={!billQuestion.trim() || isAskingQuestion}
-                  style={{
+                    style={{
                     padding: "0.75rem",
-                    background: "#3B82F6",
-                    color: "white",
+                      background: "#3B82F6",
+                      color: "white",
                     borderRadius: "0.5rem",
                     border: "none",
                     fontSize: "0.875rem",
-                    fontWeight: "500",
+                      fontWeight: "500",
                     cursor: billQuestion.trim() && !isAskingQuestion ? "pointer" : "not-allowed",
                     opacity: billQuestion.trim() && !isAskingQuestion ? 1 : 0.5,
                     display: "flex",
@@ -1403,15 +1604,15 @@ export default function BillAnalysis() {
                       Processing...
                     </>
                   ) : "Ask"}
-                </button>
-              </div>
+                  </button>
+                </div>
 
               {answerData && (
-                <div style={{
+                  <div style={{
                   marginTop: "1rem",
-                  padding: "1rem",
-                  background: "#0F172A",
-                  borderRadius: "0.5rem",
+                    padding: "1rem",
+                    background: "#0F172A",
+                    borderRadius: "0.5rem",
                   border: "1px solid #334155"
                 }}>
                   <p style={{
@@ -1419,8 +1620,8 @@ export default function BillAnalysis() {
                     fontSize: "0.875rem",
                     lineHeight: "1.5"
                   }}>{answerData.answer || answerData}</p>
-                </div>
-              )}
+                  </div>
+                )}
             </div>
 
             {/* Actions */}
@@ -1651,7 +1852,7 @@ export default function BillAnalysis() {
           }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8z"/>
             <circle cx="12" cy="12" r="3"/>
           </svg>
           View Raw OCR Text
