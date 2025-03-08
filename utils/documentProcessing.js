@@ -11,31 +11,36 @@ const openai = new OpenAI({
 // Initialize Google Cloud Vision client
 let visionClient;
 
-// Strictly require environment variables for Google Cloud Vision
-if (!process.env.GOOGLE_CLOUD_CLIENT_EMAIL) {
-  console.error('Missing required environment variable: GOOGLE_CLOUD_CLIENT_EMAIL');
-}
-if (!process.env.GOOGLE_CLOUD_PRIVATE_KEY) {
-  console.error('Missing required environment variable: GOOGLE_CLOUD_PRIVATE_KEY');
-}
-if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
-  console.error('Missing required environment variable: GOOGLE_CLOUD_PROJECT_ID');
-}
-
 try {
   // Format the private key correctly (replace escaped newlines with actual newlines)
-  const privateKey = process.env.GOOGLE_CLOUD_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  // In some environments like Vercel, the private key might be double-escaped
+  let privateKey = process.env.GOOGLE_CLOUD_PRIVATE_KEY || '';
+  
+  // Handle different formats of the private key
+  if (privateKey.includes('\\n')) {
+    privateKey = privateKey.replace(/\\n/g, '\n');
+  }
   
   console.log('Initializing Google Cloud Vision client with environment variables');
   console.log('Project ID:', process.env.GOOGLE_CLOUD_PROJECT_ID);
   console.log('Client Email:', process.env.GOOGLE_CLOUD_CLIENT_EMAIL);
   
+  // Create credentials object
+  const credentials = {
+    client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+    private_key: privateKey,
+    project_id: process.env.GOOGLE_CLOUD_PROJECT_ID
+  };
+  
+  // Log a sanitized version of the credentials for debugging
+  console.log('Using credentials:', {
+    client_email: credentials.client_email,
+    private_key: credentials.private_key ? 'PRESENT (starts with: ' + credentials.private_key.substring(0, 20) + '...)' : 'MISSING',
+    project_id: credentials.project_id
+  });
+  
   visionClient = new ImageAnnotatorClient({
-    credentials: {
-      client_email: process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
-      private_key: privateKey,
-      project_id: process.env.GOOGLE_CLOUD_PROJECT_ID
-    }
+    credentials: credentials
   });
   
   console.log('Google Cloud Vision client initialized successfully');
@@ -47,14 +52,23 @@ try {
 async function preprocessImage(imageBuffer) {
   try {
     console.log('Pre-processing image...');
-    return await sharp(imageBuffer)
+    
+    // First convert to PNG format to ensure compatibility
+    const pngBuffer = await sharp(imageBuffer)
+      .toFormat('png')
+      .toBuffer();
+    
+    console.log('Converted image to PNG format');
+    
+    // Then apply enhancements for better OCR
+    return await sharp(pngBuffer)
       .grayscale() // Convert to grayscale
       .normalize() // Normalize the image contrast
       .sharpen() // Sharpen the image
-      .threshold(128) // Apply binary threshold
       .toBuffer();
   } catch (error) {
     console.error('Image pre-processing error:', error);
+    console.log('Returning original buffer without preprocessing');
     return imageBuffer; // Return original buffer if processing fails
   }
 }
@@ -158,7 +172,17 @@ export async function fetchFileBuffer(fileUrl) {
     // Handle Firebase Storage URLs
     if (fileUrl.includes('firebasestorage.googleapis.com')) {
       console.log('Detected Firebase Storage URL');
-      const response = await fetch(fileUrl);
+      
+      // Add a cache-busting parameter to avoid caching issues
+      const urlWithCacheBuster = `${fileUrl}${fileUrl.includes('?') ? '&' : '?'}cacheBuster=${Date.now()}`;
+      console.log('Using URL with cache buster:', urlWithCacheBuster);
+      
+      const response = await fetch(urlWithCacheBuster, {
+        headers: {
+          'Accept': 'image/*, application/pdf',
+          'Cache-Control': 'no-cache'
+        }
+      });
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -166,6 +190,12 @@ export async function fetchFileBuffer(fileUrl) {
       
       const buffer = await response.buffer();
       console.log('File fetched successfully, buffer size:', buffer.length);
+      
+      // Check if the buffer is valid
+      if (!buffer || buffer.length === 0) {
+        throw new Error('Empty buffer received from URL');
+      }
+      
       return buffer;
     } else {
       throw new Error('Invalid file URL format');
