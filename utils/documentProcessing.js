@@ -568,50 +568,7 @@ async function categorizeService(service) {
     'emergency', 'er', 'ed', 'icu', 'intensive care', 'observation', 'stay'
   ];
   
-  // Check CPT code ranges
-  if (code) {
-    // Office visits and consultations (E&M codes)
-    if (/^992\d\d$/.test(code) || /^994\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Office visits and Consultations');
-      category = 'Office visits and Consultations';
-      reasoning = `CPT code ${code} is in the range for Evaluation and Management services, which are typically office visits and consultations.`;
-      return { category, reasoning };
-    }
-    
-    // Surgery codes
-    if (/^(10\d\d\d|11\d\d\d|19\d\d\d|2\d\d\d\d|3\d\d\d\d|4\d\d\d\d|5\d\d\d\d|6\d\d\d\d)$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Procedures and Surgeries');
-      category = 'Procedures and Surgeries';
-      reasoning = `CPT code ${code} is in the range for surgical procedures.`;
-      return { category, reasoning };
-    }
-    
-    // Lab and diagnostic codes
-    if (/^(8\d\d\d\d|9\d\d\d\d)$/.test(code) || /^(70\d\d\d|71\d\d\d|72\d\d\d|73\d\d\d|74\d\d\d|75\d\d\d|76\d\d\d|77\d\d\d|78\d\d\d)$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Lab and Diagnostic Tests');
-      category = 'Lab and Diagnostic Tests';
-      reasoning = `CPT code ${code} is in the range for laboratory and diagnostic testing services.`;
-      return { category, reasoning };
-    }
-    
-    // Drug codes (J codes)
-    if (/^J\d\d\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Drugs and Infusions');
-      category = 'Drugs and Infusions';
-      reasoning = `HCPCS code ${code} is a J-code, which is typically used for drugs and infusions.`;
-      return { category, reasoning };
-    }
-    
-    // Medical equipment (E codes, K codes)
-    if (/^[EK]\d\d\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Medical Equipment');
-      category = 'Medical Equipment';
-      reasoning = `HCPCS code ${code} is an ${code[0]}-code, which is typically used for medical equipment and supplies.`;
-      return { category, reasoning };
-    }
-  }
-  
-  // Check description keywords
+  // Check description keywords first (prioritize description over code)
   const combinedText = `${description} ${codeDescription}`;
   
   if (officeVisitKeywords.some(keyword => combinedText.includes(keyword))) {
@@ -656,6 +613,49 @@ async function categorizeService(service) {
     return { category, reasoning };
   }
   
+  // If we have a code, use it as a fallback for categorization
+  if (code) {
+    // Office visits and consultations (E&M codes)
+    if (/^992\d\d$/.test(code) || /^994\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Office visits and Consultations');
+      category = 'Office visits and Consultations';
+      reasoning = `CPT code ${code} is in the range for Evaluation and Management services, which are typically office visits and consultations.`;
+      return { category, reasoning };
+    }
+    
+    // Surgery codes
+    if (/^(10\d\d\d|11\d\d\d|19\d\d\d|2\d\d\d\d|3\d\d\d\d|4\d\d\d\d|5\d\d\d\d|6\d\d\d\d)$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Procedures and Surgeries');
+      category = 'Procedures and Surgeries';
+      reasoning = `CPT code ${code} is in the range for surgical procedures.`;
+      return { category, reasoning };
+    }
+    
+    // Lab and diagnostic codes
+    if (/^(8\d\d\d\d|9\d\d\d\d)$/.test(code) || /^(70\d\d\d|71\d\d\d|72\d\d\d|73\d\d\d|74\d\d\d|75\d\d\d|76\d\d\d|77\d\d\d|78\d\d\d)$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Lab and Diagnostic Tests');
+      category = 'Lab and Diagnostic Tests';
+      reasoning = `CPT code ${code} is in the range for laboratory and diagnostic testing services.`;
+      return { category, reasoning };
+    }
+    
+    // Drug codes (J codes)
+    if (/^J\d\d\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Drugs and Infusions');
+      category = 'Drugs and Infusions';
+      reasoning = `HCPCS code ${code} is a J-code, which is typically used for drugs and infusions.`;
+      return { category, reasoning };
+    }
+    
+    // Medical equipment (E codes, K codes)
+    if (/^[EK]\d\d\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Medical Equipment');
+      category = 'Medical Equipment';
+      reasoning = `HCPCS code ${code} is an ${code[0]}-code, which is typically used for medical equipment and supplies.`;
+      return { category, reasoning };
+    }
+  }
+  
   // If rule-based categorization failed, use OpenAI
   console.log('[SERVICE_CATEGORIZATION] Rule-based categorization failed, using OpenAI');
   return await categorizeServiceWithOpenAI(service);
@@ -688,6 +688,12 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
     
     console.log(`[CPT_ENHANCEMENT] Processing service ${i+1}/${services.length}: "${service.description}"`);
     
+    // First, categorize the service based on description
+    const categoryResult = await categorizeService(enhancedService);
+    enhancedService.category = categoryResult.category;
+    enhancedService.categoryReasoning = categoryResult.reasoning;
+    console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
+    
     // Check if service already has a valid CPT code
     const hasValidCode = service.code && service.code !== 'Not found' && 
                         (/^\d{5}$/.test(service.code) || /^[A-Z]\d{4}$/.test(service.code));
@@ -702,6 +708,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         const additionalContext = {
           patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
           serviceDate: service.date || null,
+          category: enhancedService.category // Pass the category to the matcher
         };
         
         // Use the extracted code for lookup
@@ -734,12 +741,6 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         console.error('[CPT_ENHANCEMENT] Error looking up extracted CPT code:', error);
       }
       
-      // Add service category
-      const categoryResult = await categorizeService(enhancedService);
-      enhancedService.category = categoryResult.category;
-      enhancedService.categoryReasoning = categoryResult.reasoning;
-      console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
-      
       enhancedServices.push(enhancedService);
       continue;
     }
@@ -748,6 +749,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
     const additionalContext = {
       patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
       serviceDate: service.date || null,
+      category: enhancedService.category // Pass the category to the matcher
     };
     
     console.log(`[CPT_ENHANCEMENT] Additional context for matching:`, JSON.stringify(additionalContext));
@@ -791,12 +793,6 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
       enhancedService.codeMatchMethod = 'error';
       // Continue without CPT code - the service will be included without a code
     }
-    
-    // Add service category
-    const categoryResult = await categorizeService(enhancedService);
-    enhancedService.category = categoryResult.category;
-    enhancedService.categoryReasoning = categoryResult.reasoning;
-    console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
     
     enhancedServices.push(enhancedService);
   }
