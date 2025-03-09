@@ -64,7 +64,7 @@ export default function Dashboard() {
 
     console.log('Fetching analyzed bills for user:', user.uid);
     try {
-      // Simpler query that doesn't require a composite index
+      // Query for bills that have either analyzedAt field or status='analyzed'
       const q = query(
         collection(db, 'bills'),
         where('userId', '==', user.uid)
@@ -79,7 +79,17 @@ export default function Dashboard() {
           console.log('Processing bill:', doc.id, data);
           
           // Only include bills that have been analyzed
-          if (!data.analyzedAt) return null;
+          // Check for either analyzedAt field or status='analyzed'
+          if (!data.analyzedAt && data.status !== 'analyzed') {
+            console.log(`Bill ${doc.id} skipped - not analyzed yet (no analyzedAt field and status is not 'analyzed')`);
+            return null;
+          }
+
+          console.log(`Bill ${doc.id} is analyzed:`, {
+            hasAnalyzedAt: !!data.analyzedAt,
+            status: data.status,
+            fileName: data.fileName
+          });
 
           // Convert timestamps to dates if needed
           let analyzedAt = data.analyzedAt;
@@ -94,14 +104,15 @@ export default function Dashboard() {
             isMedicalBill: data.isMedicalBill,
             confidence: data.confidence,
             totalAmount: data.extractedData?.billInfo?.totalAmount || 'N/A',
-            serviceDates: data.extractedData?.billInfo?.serviceDates || 'N/A'
+            serviceDates: data.extractedData?.billInfo?.serviceDates || 'N/A',
+            status: data.status || 'unknown'
           };
         })
         .filter(bill => bill !== null)
         .sort((a, b) => {
           // Sort by analyzedAt date in descending order
-          const dateA = new Date(a.analyzedAt);
-          const dateB = new Date(b.analyzedAt);
+          const dateA = new Date(a.analyzedAt || 0);
+          const dateB = new Date(b.analyzedAt || 0);
           return dateB - dateA;
         });
 
@@ -148,55 +159,49 @@ export default function Dashboard() {
       setIsMobile(window.innerWidth < 768);
     };
 
-    // Initial check
-    if (typeof window !== 'undefined') {
-      handleResize();
-      window.addEventListener('resize', handleResize);
-    }
+    window.addEventListener('resize', handleResize);
+    handleResize();
 
     return () => {
       unsubscribe();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('resize', handleResize);
-      }
+      window.removeEventListener('resize', handleResize);
     };
-  }, [router]);
+  }, [router, fetchUploads, fetchAnalyzedBills]);
 
+  // Add a new useEffect to refresh data when returning to the dashboard
   useEffect(() => {
-    // Listen for route changes to refresh data when returning to dashboard
-    const handleRouteChange = async (url) => {
-      console.log('Route changed to:', url);
-      if (url === '/dashboard' && user) {
-        console.log('Returned to dashboard, refreshing data...');
+    // This will run when the component mounts and when the route changes to dashboard
+    const refreshData = async () => {
+      if (user) {
+        console.log('Dashboard mounted or focused, refreshing data...');
         try {
           await Promise.all([
             fetchUploads(),
             fetchAnalyzedBills()
           ]);
-          console.log('Successfully refreshed dashboard data');
+          console.log('Dashboard data refreshed successfully');
         } catch (error) {
           console.error('Error refreshing dashboard data:', error);
         }
       }
     };
 
-    router.events.on('routeChangeComplete', handleRouteChange);
+    // Call immediately when component mounts
+    refreshData();
 
-    // Initial fetch when component mounts
-    if (user) {
-      console.log('Initial dashboard data fetch');
-      Promise.all([
-        fetchUploads(),
-        fetchAnalyzedBills()
-      ]).catch(error => {
-        console.error('Error in initial data fetch:', error);
-      });
-    }
+    // Also set up a listener for when the page becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      router.events.off('routeChangeComplete', handleRouteChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [router, user, fetchUploads, fetchAnalyzedBills]);
+  }, [user, fetchUploads, fetchAnalyzedBills]);
 
   const UserAvatar = ({ email }) => (
     <div style={{

@@ -92,6 +92,8 @@ async function checkCPTDatabase() {
       console.log('CPT Code:', doc.id);
       console.log('Description:', doc.data().description);
       console.log('Keywords:', doc.data().keywords);
+      console.log('Non-Facility Rate:', doc.data().nonFacilityRate || 'Not available');
+      console.log('Facility Rate:', doc.data().facilityRate || 'Not available');
       console.log('-------------------');
     });
     

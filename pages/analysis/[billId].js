@@ -867,15 +867,46 @@ export default function BillAnalysis() {
       console.log(`Ensuring bill ${billId} is properly marked as analyzed before navigation...`);
       
       // Force a final update to make sure analyzedAt and status fields are set
-      await updateDoc(doc(db, 'bills', billId), {
-        analyzedAt: serverTimestamp(),
-        status: 'analyzed'
+      const billRef = doc(db, 'bills', billId);
+      
+      // First check if the bill exists and has extractedData
+      const billDoc = await getDoc(billRef);
+      if (!billDoc.exists()) {
+        console.error(`Bill ${billId} not found in Firestore`);
+        router.push('/dashboard');
+        return;
+      }
+      
+      const billData = billDoc.data();
+      console.log(`Current bill data for ${billId}:`, {
+        hasAnalyzedAt: !!billData.analyzedAt,
+        status: billData.status,
+        hasExtractedData: !!billData.extractedData
       });
+      
+      if (!billData.extractedData) {
+        console.warn(`Bill ${billId} doesn't have extractedData yet`);
+      }
+      
+      // Update the bill with analyzedAt timestamp and status
+      const updateData = {
+        analyzedAt: serverTimestamp(),
+        status: 'analyzed',
+        // Ensure these fields are set even if they weren't before
+        isMedicalBill: billData.isMedicalBill || true,
+        confidence: billData.confidence || 'high'
+      };
+      
+      console.log(`Updating bill ${billId} with:`, updateData);
+      await updateDoc(billRef, updateData);
       
       console.log(`Successfully updated bill ${billId}. Navigating to dashboard...`);
       
-      // Use router.push for programmatic navigation
-      router.push('/dashboard');
+      // Add a small delay to ensure Firestore has time to update
+      setTimeout(() => {
+        // Use router.push for programmatic navigation
+        router.push('/dashboard');
+      }, 500);
     } catch (error) {
       console.error('Error updating bill before navigation:', error);
       // Navigate anyway, even if the update fails
@@ -1241,7 +1272,40 @@ export default function BillAnalysis() {
                                     fontFamily: "monospace"
                                   }}>
                                     CODE: {service.code}
+                                    {service.codeMatchMethod && (
+                                      <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem", color: "#94A3B8" }}>
+                                        via {service.codeMatchMethod.replace('_', ' ')}
+                                        {service.codeConfidence && ` (${Math.round(service.codeConfidence * 100)}% match)`}
+                                      </span>
+                                    )}
                                   </span>
+                                </div>
+                              )}
+                              
+                              {/* Display code description if available and different from service description */}
+                              {service.codeDescription && service.codeDescription !== service.description && (
+                                <div style={{
+                                  fontSize: "0.8rem",
+                                  color: "#94A3B8",
+                                  marginTop: "0.25rem",
+                                  fontStyle: "italic"
+                                }}>
+                                  {service.codeDescription}
+                                </div>
+                              )}
+                              
+                              {/* Display code reasoning if available */}
+                              {service.codeReasoning && (
+                                <div style={{
+                                  fontSize: "0.8rem",
+                                  color: "#94A3B8",
+                                  marginTop: "0.25rem",
+                                  padding: "0.5rem",
+                                  background: "rgba(15, 23, 42, 0.3)",
+                                  borderRadius: "0.5rem",
+                                  border: "1px dashed rgba(59, 130, 246, 0.15)"
+                                }}>
+                                  <span style={{ fontWeight: "500" }}>Reasoning:</span> {service.codeReasoning}
                                 </div>
                               )}
                             </div>
@@ -1303,15 +1367,26 @@ export default function BillAnalysis() {
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em"
                                 }}>
-                                  Reasonable Price
+                                  Medicare Rate
                                 </span>
                               <span style={{ 
                                   fontSize: isMobile ? "1.25rem" : "1.5rem",
                                   fontWeight: "700",
                                   color: "#10B981",
                                 }}>
-                                  {/* Placeholder for reasonable price - will be replaced with actual data */}
-                                  {service.description.includes("Check Up") ? "$150.00" : "$300.00"}
+                                  {service.reimbursementRate 
+                                    ? `$${service.reimbursementRate.toFixed(2)}` 
+                                    : "Not available"}
+                                  {service.reimbursementType && (
+                                    <span style={{ 
+                                      fontSize: "0.75rem",
+                                      color: "#94A3B8",
+                                      marginLeft: "0.5rem",
+                                      fontWeight: "normal"
+                                    }}>
+                                      ({service.reimbursementType})
+                                    </span>
+                                  )}
                               </span>
                               </div>
                               
@@ -1326,10 +1401,10 @@ export default function BillAnalysis() {
                                 paddingTop: isMobile ? "1rem" : "0",
                                 marginTop: isMobile ? "0.5rem" : "0"
                               }}>
-                              <span style={{
-                                fontSize: "0.75rem",
+                                <span style={{ 
+                                  fontSize: "0.75rem",
                                   color: "#94A3B8",
-                                fontWeight: "500",
+                                  fontWeight: "500",
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em"
                                 }}>
@@ -1350,13 +1425,13 @@ export default function BillAnalysis() {
                                       <line x1="12" y1="8" x2="12" y2="12"></line>
                                       <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                     </svg>
-                                  <span style={{
+                                     <span style={{ 
                                     fontSize: "0.85rem",
                                     fontWeight: "600",
                                     color: "#EF4444"
-                                  }}>
+                                     }}>
                                     Likely Overcharged
-                              </span>
+                                 </span>
                                 </div>
                               </div>
                             </div>

@@ -335,7 +335,7 @@ export async function processWithLLM(text, isVerificationMode = false) {
         
         // Enhance services with CPT codes if they don't already have valid codes
         console.log('Before CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
-        parsedResponse.services = await enhanceServicesWithCPTCodes(parsedResponse.services, parsedResponse.patientInfo);
+        parsedResponse.services = await enhanceServicesWithCPTCodes(parsedResponse.services, parsedResponse.patientInfo, parsedResponse.billInfo);
         console.log('After CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
       }
 
@@ -354,14 +354,93 @@ export async function processWithLLM(text, isVerificationMode = false) {
 }
 
 /**
+ * Determine if a service should use facility or non-facility rates
+ * @param {Object} service - The service to check
+ * @param {Object} billInfo - Information about the bill
+ * @returns {string} - 'facility' or 'non-facility'
+ */
+function determineFacilityType(service, billInfo) {
+  console.log('[FACILITY_TYPE] Determining facility type for service:', service.description);
+  console.log('[FACILITY_TYPE] Bill info:', JSON.stringify(billInfo, null, 2));
+  
+  // Default to non-facility if we can't determine
+  let facilityType = 'non-facility';
+  
+  // Check if the bill is from a hospital or surgical center
+  if (billInfo && billInfo.facilityName) {
+    const facilityName = billInfo.facilityName.toLowerCase();
+    const hospitalKeywords = ['hospital', 'medical center', 'med ctr', 'medical ctr', 'surgery center', 'surgical center', 'health system'];
+    
+    // Check if facility name contains hospital keywords
+    const isHospital = hospitalKeywords.some(keyword => facilityName.includes(keyword));
+    
+    if (isHospital) {
+      console.log('[FACILITY_TYPE] Facility name indicates hospital setting');
+      facilityType = 'facility';
+    }
+  }
+  
+  // Check service description for clues
+  if (service.description) {
+    const serviceDesc = service.description.toLowerCase();
+    
+    // Services typically performed in facilities
+    const facilityServiceKeywords = [
+      'surgery', 'surgical', 'operation', 'anesthesia', 'anesthetic',
+      'emergency', 'inpatient', 'admission', 'hospital', 'icu', 'intensive care',
+      'catheter', 'catheterization', 'endoscopy', 'biopsy', 'implant'
+    ];
+    
+    // Check if service description contains facility keywords
+    const isFacilityService = facilityServiceKeywords.some(keyword => serviceDesc.includes(keyword));
+    
+    if (isFacilityService) {
+      console.log('[FACILITY_TYPE] Service description indicates facility setting');
+      facilityType = 'facility';
+    }
+    
+    // Services typically performed in non-facility settings
+    const nonFacilityServiceKeywords = [
+      'office visit', 'consultation', 'check-up', 'checkup', 'follow-up',
+      'evaluation', 'assessment', 'screening', 'preventive', 'vaccination',
+      'immunization', 'injection', 'outpatient'
+    ];
+    
+    // Check if service description contains non-facility keywords
+    const isNonFacilityService = nonFacilityServiceKeywords.some(keyword => serviceDesc.includes(keyword));
+    
+    if (isNonFacilityService) {
+      console.log('[FACILITY_TYPE] Service description indicates non-facility setting');
+      facilityType = 'non-facility';
+    }
+  }
+  
+  // Check service details for clues
+  if (service.details) {
+    const details = service.details.toLowerCase();
+    
+    // Room and board indicates inpatient/facility
+    if (details.includes('room') || details.includes('bed') || details.includes('inpatient')) {
+      console.log('[FACILITY_TYPE] Service details indicate facility setting');
+      facilityType = 'facility';
+    }
+  }
+  
+  console.log(`[FACILITY_TYPE] Determined facility type: ${facilityType}`);
+  return facilityType;
+}
+
+/**
  * Enhance services with CPT codes
  * @param {Array} services - The services extracted from the bill
  * @param {Object} patientInfo - The patient information from the bill
+ * @param {Object} billInfo - Information about the bill
  * @returns {Promise<Array>} - The enhanced services with CPT codes
  */
-async function enhanceServicesWithCPTCodes(services, patientInfo) {
+async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
   console.log('[CPT_ENHANCEMENT] Starting CPT code enhancement for services:', JSON.stringify(services, null, 2));
   console.log('[CPT_ENHANCEMENT] Patient info available:', patientInfo ? 'Yes' : 'No');
+  console.log('[CPT_ENHANCEMENT] Bill info available:', billInfo ? 'Yes' : 'No');
   
   if (!services || services.length === 0) {
     console.log('[CPT_ENHANCEMENT] No services to enhance');
@@ -405,6 +484,33 @@ async function enhanceServicesWithCPTCodes(services, patientInfo) {
         enhancedService.codeConfidence = match.confidence;
         enhancedService.codeReasoning = match.reasoning;
         enhancedService.codeMatchMethod = match.matchMethod;
+        
+        // Determine facility type and add appropriate reimbursement rate
+        const facilityType = determineFacilityType(service, billInfo);
+        enhancedService.facilityType = facilityType;
+        
+        if (facilityType === 'facility' && match.facilityRate !== null) {
+          enhancedService.reimbursementRate = match.facilityRate;
+          enhancedService.reimbursementType = 'facility';
+        } else if (match.nonFacilityRate !== null) {
+          enhancedService.reimbursementRate = match.nonFacilityRate;
+          enhancedService.reimbursementType = 'non-facility';
+        }
+        
+        // Calculate potential savings if we have both billed amount and reimbursement rate
+        if (enhancedService.reimbursementRate && enhancedService.amount) {
+          // Extract numeric amount from string like "$123.45"
+          const amountStr = enhancedService.amount.replace(/[^0-9.]/g, '');
+          const amount = parseFloat(amountStr);
+          
+          if (!isNaN(amount) && amount > 0) {
+            const savings = amount - enhancedService.reimbursementRate;
+            if (savings > 0) {
+              enhancedService.potentialSavings = savings;
+              enhancedService.savingsPercentage = (savings / amount) * 100;
+            }
+          }
+        }
       } else {
         console.log('[CPT_ENHANCEMENT] No CPT code match found');
         enhancedService.code = 'Not found';

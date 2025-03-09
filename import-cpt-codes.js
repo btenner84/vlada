@@ -98,6 +98,13 @@ async function importCPTCodesFromExcel() {
     if (rawData.length > 0) {
       console.log('First row structure:', Object.keys(rawData[0]));
       console.log('First row data:', rawData[0]);
+      
+      // Log all column names to identify the reimbursement rate columns
+      const keys = Object.keys(rawData[0]);
+      console.log('All column names:');
+      keys.forEach((key, index) => {
+        console.log(`Column ${index} (${String.fromCharCode(65 + index)}): ${key}`);
+      });
     }
     
     // Process each row - handle the specific structure of this Excel file
@@ -110,6 +117,18 @@ async function importCPTCodesFromExcel() {
       
       let cptCode = row[codeColumnName];
       let description = row[descColumnName];
+      
+      // Get reimbursement rates from columns L and M
+      let nonFacilityRate = null;
+      let facilityRate = null;
+      
+      // Use the correct column names from the Excel file
+      if (row['__EMPTY_11'] !== undefined) { // Column L - Total Non Facility Reimbursement Rate
+        nonFacilityRate = row['__EMPTY_11'];
+      }
+      if (row['__EMPTY_12'] !== undefined) { // Column M - Total Facility Reimbursement Rate
+        facilityRate = row['__EMPTY_12'];
+      }
       
       // Skip if code or description is not found
       if (!cptCode || !description) {
@@ -146,6 +165,17 @@ async function importCPTCodesFromExcel() {
         return null;
       }
       
+      // Convert reimbursement rates to numbers if they exist
+      if (nonFacilityRate !== null && nonFacilityRate !== undefined) {
+        nonFacilityRate = parseFloat(nonFacilityRate.toString().replace(/[^\d.-]/g, ''));
+        if (isNaN(nonFacilityRate)) nonFacilityRate = null;
+      }
+      
+      if (facilityRate !== null && facilityRate !== undefined) {
+        facilityRate = parseFloat(facilityRate.toString().replace(/[^\d.-]/g, ''));
+        if (isNaN(facilityRate)) facilityRate = null;
+      }
+      
       // Generate keywords for better matching
       const keywords = generateKeywords(description);
       
@@ -153,6 +183,8 @@ async function importCPTCodesFromExcel() {
         code: cptCode,
         description: description.toLowerCase(),
         keywords,
+        nonFacilityRate: nonFacilityRate,
+        facilityRate: facilityRate,
         lastUpdated: new Date()
       };
     }).filter(Boolean); // Remove null entries

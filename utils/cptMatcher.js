@@ -129,7 +129,9 @@ async function findExactMatch(serviceDescription) {
           exactMatches.push({
             cptCode: data.code,
             description: data.description,
-            confidence: calculateExactMatchConfidence(normalizedDesc, data.description)
+            confidence: calculateExactMatchConfidence(normalizedDesc, data.description),
+            nonFacilityRate: data.nonFacilityRate || null,
+            facilityRate: data.facilityRate || null
           });
         }
       });
@@ -151,7 +153,9 @@ async function findExactMatch(serviceDescription) {
     return {
       cptCode: data.code,
       description: data.description,
-      confidence: 1.0
+      confidence: 1.0,
+      nonFacilityRate: data.nonFacilityRate || null,
+      facilityRate: data.facilityRate || null
     };
   } catch (error) {
     console.error('[CPT_MATCHER_EXACT] Error finding exact match:', error);
@@ -230,7 +234,9 @@ async function findMatchInDatabase(serviceDescription) {
       return {
         cptCode: data.code,
         description: data.description,
-        confidence: score
+        confidence: score,
+        nonFacilityRate: data.nonFacilityRate || null,
+        facilityRate: data.facilityRate || null
       };
     });
     
@@ -283,7 +289,9 @@ async function verifyAIMatchWithDatabase(cptCode, serviceDescription) {
     return {
       cptCode: data.code,
       description: data.description,
-      confidence: Math.max(score, 0.7) // Minimum confidence of 0.7 since it was AI-matched
+      confidence: Math.max(score, 0.7), // Minimum confidence of 0.7 since it was AI-matched
+      nonFacilityRate: data.nonFacilityRate || null,
+      facilityRate: data.facilityRate || null
     };
   } catch (error) {
     console.error('[CPT_MATCHER_VERIFY] Error verifying AI match:', error);
