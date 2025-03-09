@@ -384,6 +384,7 @@ export default function BillAnalysis() {
         // Also update the main bill document
         await updateDoc(doc(db, 'bills', billData.id), {
           analyzedAt: serverTimestamp(),
+          analyzedAtString: new Date().toISOString(), // Add string version for compatibility
           extractedData: {
             ...data.extractedData,
             insuranceInfo: {
@@ -509,6 +510,7 @@ export default function BillAnalysis() {
             // Also update the main bill document
             await updateDoc(doc(db, 'bills', billData.id), {
               analyzedAt: serverTimestamp(),
+              analyzedAtString: new Date().toISOString(), // Add string version for compatibility
               extractedData: {
                 ...result,
                 insuranceInfo: {
@@ -599,6 +601,7 @@ export default function BillAnalysis() {
           // Also update the main bill document
           await updateDoc(doc(db, 'bills', billData.id), {
             analyzedAt: serverTimestamp(),
+            analyzedAtString: new Date().toISOString(), // Add string version for compatibility
             extractedData: {
               ...dummyData,
               insuranceInfo: {
@@ -881,6 +884,7 @@ export default function BillAnalysis() {
       const billData = billDoc.data();
       console.log(`Current bill data for ${billId}:`, {
         hasAnalyzedAt: !!billData.analyzedAt,
+        hasAnalyzedAtString: !!billData.analyzedAtString,
         status: billData.status,
         hasExtractedData: !!billData.extractedData
       });
@@ -889,9 +893,13 @@ export default function BillAnalysis() {
         console.warn(`Bill ${billId} doesn't have extractedData yet`);
       }
       
+      // Create a current timestamp
+      const now = new Date();
+      
       // Update the bill with analyzedAt timestamp and status
       const updateData = {
         analyzedAt: serverTimestamp(),
+        analyzedAtString: now.toISOString(), // Add string version for compatibility
         status: 'analyzed',
         // Ensure these fields are set even if they weren't before
         isMedicalBill: billData.isMedicalBill || true,
@@ -906,6 +914,7 @@ export default function BillAnalysis() {
       const updatedData = updatedBillDoc.data();
       console.log(`Updated bill data for ${billId}:`, {
         hasAnalyzedAt: !!updatedData.analyzedAt,
+        hasAnalyzedAtString: !!updatedData.analyzedAtString,
         status: updatedData.status
       });
       

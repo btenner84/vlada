@@ -99,30 +99,57 @@ export default function Dashboard() {
 
           console.log(`Bill ${doc.id} is analyzed:`, {
             hasAnalyzedAt: !!data.analyzedAt,
+            hasAnalyzedAtString: !!data.analyzedAtString,
             status: data.status,
             hasExtractedData: !!data.extractedData,
             fileName: data.fileName
           });
 
-          // Convert timestamps to dates if needed
-          let analyzedAt = data.analyzedAt;
+          // Get a valid timestamp for sorting, trying multiple sources
+          let timestamp = null;
+          
+          // Try analyzedAt as Firestore timestamp
           if (data.analyzedAt && typeof data.analyzedAt.toDate === 'function') {
-            analyzedAt = data.analyzedAt.toDate().toISOString();
-          } else if (!analyzedAt && data.uploadedAt) {
-            // If no analyzedAt but we have uploadedAt, use that as a fallback
-            analyzedAt = data.uploadedAt;
-            if (typeof data.uploadedAt.toDate === 'function') {
-              analyzedAt = data.uploadedAt.toDate().toISOString();
+            timestamp = data.analyzedAt.toDate();
+            console.log(`Using Firestore timestamp for ${doc.id}`);
+          } 
+          // Try analyzedAtString
+          else if (data.analyzedAtString) {
+            try {
+              timestamp = new Date(data.analyzedAtString);
+              console.log(`Using string timestamp for ${doc.id}`);
+            } catch (e) {
+              console.warn(`Invalid analyzedAtString for ${doc.id}`);
             }
-          } else if (!analyzedAt) {
-            // Last resort: use current time
-            analyzedAt = new Date().toISOString();
           }
+          // Try uploadedAt as Firestore timestamp
+          else if (data.uploadedAt && typeof data.uploadedAt.toDate === 'function') {
+            timestamp = data.uploadedAt.toDate();
+            console.log(`Using uploadedAt timestamp for ${doc.id}`);
+          }
+          // Try uploadedAt as string
+          else if (data.uploadedAt) {
+            try {
+              timestamp = new Date(data.uploadedAt);
+              console.log(`Using uploadedAt string for ${doc.id}`);
+            } catch (e) {
+              console.warn(`Invalid uploadedAt for ${doc.id}`);
+            }
+          }
+          // Last resort: use current time
+          else {
+            timestamp = new Date();
+            console.log(`Using current time for ${doc.id}`);
+          }
+          
+          // Convert to ISO string for consistent format
+          const timestampStr = timestamp ? timestamp.toISOString() : new Date().toISOString();
 
           return {
             id: doc.id,
             fileName: data.fileName,
-            analyzedAt: analyzedAt,
+            analyzedAt: timestampStr,
+            timestamp: timestamp, // Keep the actual Date object for sorting
             isMedicalBill: data.isMedicalBill,
             confidence: data.confidence,
             totalAmount: data.extractedData?.billInfo?.totalAmount || 'N/A',
@@ -132,10 +159,13 @@ export default function Dashboard() {
         })
         .filter(bill => bill !== null)
         .sort((a, b) => {
-          // Sort by analyzedAt date in descending order
-          const dateA = new Date(a.analyzedAt || 0);
-          const dateB = new Date(b.analyzedAt || 0);
-          return dateB - dateA;
+          // Sort by timestamp in descending order (newest first)
+          // Use the actual Date objects for more reliable sorting
+          if (a.timestamp && b.timestamp) {
+            return b.timestamp - a.timestamp;
+          }
+          // Fallback to string comparison if needed
+          return b.analyzedAt.localeCompare(a.analyzedAt);
         });
 
       console.log('Setting analyzed bills:', bills);

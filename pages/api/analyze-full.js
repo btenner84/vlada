@@ -160,6 +160,9 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
       try {
         const billRef = adminDb.collection('bills').doc(billId);
         
+        // Create both a server timestamp and a string timestamp for redundancy
+        const now = new Date();
+        
         // Update with all the analysis results
         await billRef.update({
           extractedText,
@@ -167,14 +170,16 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
           isMedicalBill: enhancedAnalysisResult.isMedicalBill,
           confidence: enhancedAnalysisResult.confidence,
           reason: enhancedAnalysisResult.reason,
+          // Use both timestamp formats for maximum compatibility
           analyzedAt: admin.firestore.FieldValue.serverTimestamp(),
+          analyzedAtString: now.toISOString(), // Add a string version as backup
           status: 'analyzed',
           fileType,
           enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false,
           processingMethod: enhancedAnalysisResult.enhancedData ? 'enhanced-ai' : 'server'
         });
         
-        console.log(`Successfully updated bill document ${billId} in Firestore`);
+        console.log(`Successfully updated bill document ${billId} in Firestore with timestamp: ${now.toISOString()}`);
       } catch (updateError) {
         console.error(`Error updating bill document ${billId} in Firestore:`, updateError);
         // Continue even if update fails - the client will handle it
