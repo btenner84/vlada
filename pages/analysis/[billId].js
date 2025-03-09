@@ -111,6 +111,7 @@ export default function BillAnalysis() {
   const [billQuestion, setBillQuestion] = useState('');
   const [answerData, setAnswerData] = useState('');
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
+  const [expandedReasoningId, setExpandedReasoningId] = useState(null);
 
   // Helper function to clean up patient names
   const cleanPatientName = (name) => {
@@ -1221,22 +1222,6 @@ export default function BillAnalysis() {
                           position: "relative",
                           overflow: "hidden"
                         }}>
-                          {/* Price tag decoration */}
-                          <div style={{
-                            position: "absolute",
-                            top: "0",
-                            right: "0",
-                            background: "rgba(59, 130, 246, 0.2)",
-                            padding: "0.25rem 0.75rem",
-                            borderBottomLeftRadius: "0.5rem",
-                            borderTopRightRadius: "0.5rem",
-                            fontSize: "0.75rem",
-                            color: "#3B82F6",
-                            fontWeight: "600"
-                          }}>
-                            BILLED AMOUNT
-                          </div>
-                          
                           <div style={{
                           display: "flex",
                             flexDirection: "column",
@@ -1260,8 +1245,8 @@ export default function BillAnalysis() {
                                 <div style={{
                                   display: "inline-flex",
                                   alignItems: "center",
-                          background: "rgba(59, 130, 246, 0.1)",
-                          borderRadius: "0.5rem",
+                                  background: "rgba(59, 130, 246, 0.1)",
+                                  borderRadius: "0.5rem",
                                   padding: "0.3rem 0.6rem",
                                   width: "fit-content"
                                 }}>
@@ -1282,6 +1267,27 @@ export default function BillAnalysis() {
                                 </div>
                               )}
                               
+                              {/* Display service category if available */}
+                              {service.category && (
+                                <div style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  background: "rgba(16, 185, 129, 0.1)",
+                                  borderRadius: "0.5rem",
+                                  padding: "0.3rem 0.6rem",
+                                  marginTop: "0.5rem",
+                                  width: "fit-content"
+                                }}>
+                                  <span style={{
+                                    fontSize: "0.8rem",
+                                    fontWeight: "500",
+                                    color: "#10B981"
+                                  }}>
+                                    CATEGORY: {service.category}
+                                  </span>
+                                </div>
+                              )}
+                              
                               {/* Display code description if available and different from service description */}
                               {service.codeDescription && service.codeDescription !== service.description && (
                                 <div style={{
@@ -1294,18 +1300,71 @@ export default function BillAnalysis() {
                                 </div>
                               )}
                               
-                              {/* Display code reasoning if available */}
-                              {service.codeReasoning && (
+                              {/* Replace code reasoning with AI Reasoning button */}
+                              {(service.codeReasoning || service.categoryReasoning) && (
                                 <div style={{
-                                  fontSize: "0.8rem",
-                                  color: "#94A3B8",
-                                  marginTop: "0.25rem",
-                                  padding: "0.5rem",
-                                  background: "rgba(15, 23, 42, 0.3)",
-                                  borderRadius: "0.5rem",
-                                  border: "1px dashed rgba(59, 130, 246, 0.15)"
+                                  marginTop: "0.5rem",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.5rem"
                                 }}>
-                                  <span style={{ fontWeight: "500" }}>Reasoning:</span> {service.codeReasoning}
+                                  <button
+                                    onClick={() => setExpandedReasoningId(expandedReasoningId === index ? null : index)}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "0.5rem",
+                                      background: "rgba(59, 130, 246, 0.1)",
+                                      border: "1px solid rgba(59, 130, 246, 0.2)",
+                                      borderRadius: "0.5rem",
+                                      padding: "0.4rem 0.8rem",
+                                      fontSize: "0.8rem",
+                                      fontWeight: "500",
+                                      color: "#3B82F6",
+                                      cursor: "pointer",
+                                      width: "fit-content"
+                                    }}
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                    </svg>
+                                    AI Reasoning
+                                    {expandedReasoningId === index ? (
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="18 15 12 9 6 15"></polyline>
+                                      </svg>
+                                    ) : (
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                      </svg>
+                                    )}
+                                  </button>
+                                  
+                                  {expandedReasoningId === index && (
+                                    <div style={{
+                                      fontSize: "0.8rem",
+                                      color: "#94A3B8",
+                                      padding: "0.75rem",
+                                      background: "rgba(15, 23, 42, 0.3)",
+                                      borderRadius: "0.5rem",
+                                      border: "1px dashed rgba(59, 130, 246, 0.15)",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "0.75rem"
+                                    }}>
+                                      {service.codeReasoning && (
+                                        <div>
+                                          <span style={{ fontWeight: "600", color: "#3B82F6" }}>Code Reasoning:</span> {service.codeReasoning}
+                                        </div>
+                                      )}
+                                      {service.categoryReasoning && (
+                                        <div>
+                                          <span style={{ fontWeight: "600", color: "#10B981" }}>Category Reasoning:</span> {service.categoryReasoning}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

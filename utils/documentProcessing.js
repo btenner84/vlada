@@ -431,6 +431,237 @@ function determineFacilityType(service, billInfo) {
 }
 
 /**
+ * Categorize a medical service into one of six predefined buckets using OpenAI
+ * @param {object} service - The service object to categorize
+ * @returns {Promise<string>} - The category name
+ */
+async function categorizeServiceWithOpenAI(service) {
+  try {
+    console.log(`[SERVICE_CATEGORIZATION_AI] Starting OpenAI categorization for: "${service.description}"`);
+    
+    // Extract relevant information
+    const description = service.description || '';
+    const codeDescription = service.codeDescription || '';
+    const code = service.code || '';
+    
+    // Create a prompt for OpenAI
+    const prompt = `I need to categorize this medical service into one of six predefined categories:
+    
+Service Description: "${description}"
+${code ? `CPT/HCPCS Code: ${code}` : ''}
+${codeDescription ? `Code Description: "${codeDescription}"` : ''}
+
+The six categories are:
+1. Office visits and Consultations - includes preventive visits, check-ups, evaluations, consultations
+2. Procedures and Surgeries - includes surgical procedures, biopsies, repairs, implants
+3. Lab and Diagnostic Tests - includes laboratory tests, imaging, scans, blood work
+4. Drugs and Infusions - includes medications, injections, infusions, vaccines
+5. Medical Equipment - includes supplies, devices, prosthetics, orthotics
+6. Hospital stays and emergency care visits - includes inpatient care, emergency room visits
+
+Please categorize this service into one of these six categories. Respond in JSON format with the following structure:
+{
+  "category": "Category Name",
+  "confidence": 0.95,
+  "reasoning": "Brief explanation of why this category is appropriate"
+}`;
+
+    console.log('[SERVICE_CATEGORIZATION_AI] Calling OpenAI API for service categorization');
+    
+    // Call OpenAI API
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are a medical billing expert specializing in categorizing medical services. Your task is to categorize services into one of six predefined categories. Be precise and consider both the service description and CPT/HCPCS code if provided.' 
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" }
+    });
+    
+    // Parse the response
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log('[SERVICE_CATEGORIZATION_AI] OpenAI response:', JSON.stringify(result, null, 2));
+    
+    // Validate the category
+    const validCategories = [
+      'Office visits and Consultations',
+      'Procedures and Surgeries',
+      'Lab and Diagnostic Tests',
+      'Drugs and Infusions',
+      'Medical Equipment',
+      'Hospital stays and emergency care visits'
+    ];
+    
+    if (!validCategories.includes(result.category)) {
+      console.warn('[SERVICE_CATEGORIZATION_AI] OpenAI returned invalid category:', result.category);
+      return { category: 'Other', reasoning: null };
+    }
+    
+    console.log(`[SERVICE_CATEGORIZATION_AI] Categorized as "${result.category}" with confidence ${result.confidence}`);
+    return { 
+      category: result.category, 
+      reasoning: result.reasoning 
+    };
+  } catch (error) {
+    console.error('[SERVICE_CATEGORIZATION_AI] Error categorizing service with OpenAI:', error);
+    return { category: 'Other', reasoning: null };
+  }
+}
+
+/**
+ * Categorize a medical service into one of six predefined buckets
+ * @param {object} service - The service object to categorize
+ * @returns {Promise<string>} - The category name
+ */
+async function categorizeService(service) {
+  console.log('[SERVICE_CATEGORIZATION] Categorizing service:', service.description);
+  
+  // Default category if we can't determine
+  let category = 'Other';
+  let reasoning = null;
+  
+  // Extract relevant information
+  const description = (service.description || '').toLowerCase();
+  const codeDescription = (service.codeDescription || '').toLowerCase();
+  const code = service.code || '';
+  
+  // Office visits and Consultations
+  const officeVisitKeywords = [
+    'office visit', 'consultation', 'consult', 'evaluation', 'assessment', 
+    'check up', 'check-up', 'checkup', 'exam', 'examination', 'visit', 
+    'follow up', 'follow-up', 'followup', 'preventive', 'wellness'
+  ];
+  
+  // Procedures and Surgeries
+  const procedureKeywords = [
+    'surgery', 'surgical', 'procedure', 'operation', 'removal', 'excision', 
+    'biopsy', 'repair', 'incision', 'implant', 'injection', 'catheter', 
+    'endoscopy', 'colonoscopy', 'arthroscopy'
+  ];
+  
+  // Lab and Diagnostic Tests
+  const labTestKeywords = [
+    'lab', 'laboratory', 'test', 'panel', 'screening', 'x-ray', 'xray', 
+    'imaging', 'scan', 'mri', 'ct', 'ultrasound', 'ekg', 'ecg', 'eeg', 
+    'diagnostic', 'analysis', 'blood', 'urine', 'specimen', 'culture'
+  ];
+  
+  // Drugs and Infusions
+  const drugKeywords = [
+    'drug', 'medication', 'infusion', 'injection', 'iv', 'dose', 'vaccine', 
+    'immunization', 'antibiotic', 'mg', 'ml', 'vial', 'solution', 'pharmacy'
+  ];
+  
+  // Medical Equipment
+  const equipmentKeywords = [
+    'equipment', 'device', 'supply', 'supplies', 'dme', 'prosthetic', 
+    'orthotic', 'brace', 'crutch', 'wheelchair', 'walker', 'monitor'
+  ];
+  
+  // Hospital stays and emergency care visits
+  const hospitalKeywords = [
+    'hospital', 'inpatient', 'admission', 'discharge', 'room', 'bed', 
+    'emergency', 'er', 'ed', 'icu', 'intensive care', 'observation', 'stay'
+  ];
+  
+  // Check CPT code ranges
+  if (code) {
+    // Office visits and consultations (E&M codes)
+    if (/^992\d\d$/.test(code) || /^994\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Office visits and Consultations');
+      category = 'Office visits and Consultations';
+      reasoning = `CPT code ${code} is in the range for Evaluation and Management services, which are typically office visits and consultations.`;
+      return { category, reasoning };
+    }
+    
+    // Surgery codes
+    if (/^(10\d\d\d|11\d\d\d|19\d\d\d|2\d\d\d\d|3\d\d\d\d|4\d\d\d\d|5\d\d\d\d|6\d\d\d\d)$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Procedures and Surgeries');
+      category = 'Procedures and Surgeries';
+      reasoning = `CPT code ${code} is in the range for surgical procedures.`;
+      return { category, reasoning };
+    }
+    
+    // Lab and diagnostic codes
+    if (/^(8\d\d\d\d|9\d\d\d\d)$/.test(code) || /^(70\d\d\d|71\d\d\d|72\d\d\d|73\d\d\d|74\d\d\d|75\d\d\d|76\d\d\d|77\d\d\d|78\d\d\d)$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Lab and Diagnostic Tests');
+      category = 'Lab and Diagnostic Tests';
+      reasoning = `CPT code ${code} is in the range for laboratory and diagnostic testing services.`;
+      return { category, reasoning };
+    }
+    
+    // Drug codes (J codes)
+    if (/^J\d\d\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Drugs and Infusions');
+      category = 'Drugs and Infusions';
+      reasoning = `HCPCS code ${code} is a J-code, which is typically used for drugs and infusions.`;
+      return { category, reasoning };
+    }
+    
+    // Medical equipment (E codes, K codes)
+    if (/^[EK]\d\d\d\d$/.test(code)) {
+      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Medical Equipment');
+      category = 'Medical Equipment';
+      reasoning = `HCPCS code ${code} is an ${code[0]}-code, which is typically used for medical equipment and supplies.`;
+      return { category, reasoning };
+    }
+  }
+  
+  // Check description keywords
+  const combinedText = `${description} ${codeDescription}`;
+  
+  if (officeVisitKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Office visits and Consultations');
+    category = 'Office visits and Consultations';
+    reasoning = `The service description contains keywords related to office visits and consultations.`;
+    return { category, reasoning };
+  }
+  
+  if (procedureKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Procedures and Surgeries');
+    category = 'Procedures and Surgeries';
+    reasoning = `The service description contains keywords related to procedures and surgeries.`;
+    return { category, reasoning };
+  }
+  
+  if (labTestKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Lab and Diagnostic Tests');
+    category = 'Lab and Diagnostic Tests';
+    reasoning = `The service description contains keywords related to laboratory and diagnostic tests.`;
+    return { category, reasoning };
+  }
+  
+  if (drugKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Drugs and Infusions');
+    category = 'Drugs and Infusions';
+    reasoning = `The service description contains keywords related to drugs and infusions.`;
+    return { category, reasoning };
+  }
+  
+  if (equipmentKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Medical Equipment');
+    category = 'Medical Equipment';
+    reasoning = `The service description contains keywords related to medical equipment and supplies.`;
+    return { category, reasoning };
+  }
+  
+  if (hospitalKeywords.some(keyword => combinedText.includes(keyword))) {
+    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Hospital stays and emergency care visits');
+    category = 'Hospital stays and emergency care visits';
+    reasoning = `The service description contains keywords related to hospital stays and emergency care.`;
+    return { category, reasoning };
+  }
+  
+  // If rule-based categorization failed, use OpenAI
+  console.log('[SERVICE_CATEGORIZATION] Rule-based categorization failed, using OpenAI');
+  return await categorizeServiceWithOpenAI(service);
+}
+
+/**
  * Enhance services with CPT codes
  * @param {Array} services - The services extracted from the bill
  * @param {Object} patientInfo - The patient information from the bill
@@ -449,6 +680,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
   
   const enhancedServices = [];
   
+  // Process services sequentially to handle async categorization
   for (let i = 0; i < services.length; i++) {
     const service = services[i];
     // Create a copy of the service to avoid modifying the original
@@ -502,6 +734,12 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         console.error('[CPT_ENHANCEMENT] Error looking up extracted CPT code:', error);
       }
       
+      // Add service category
+      const categoryResult = await categorizeService(enhancedService);
+      enhancedService.category = categoryResult.category;
+      enhancedService.categoryReasoning = categoryResult.reasoning;
+      console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
+      
       enhancedServices.push(enhancedService);
       continue;
     }
@@ -553,6 +791,12 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
       enhancedService.codeMatchMethod = 'error';
       // Continue without CPT code - the service will be included without a code
     }
+    
+    // Add service category
+    const categoryResult = await categorizeService(enhancedService);
+    enhancedService.category = categoryResult.category;
+    enhancedService.categoryReasoning = categoryResult.reasoning;
+    console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
     
     enhancedServices.push(enhancedService);
   }
