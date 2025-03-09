@@ -13,12 +13,38 @@ const db = adminDb;
  * Match a service description to a CPT code
  * @param {string} serviceDescription - The service description from the bill
  * @param {object} additionalContext - Additional context about the service
+ * @param {string} extractedCode - CPT code directly extracted from the bill (if available)
  * @returns {Promise<object|null>} - The matched CPT code information or null
  */
-export async function matchServiceToCPT(serviceDescription, additionalContext = {}) {
+export async function matchServiceToCPT(serviceDescription, additionalContext = {}, extractedCode = null) {
   try {
     console.log(`[CPT_MATCHER] Starting CPT code matching for: "${serviceDescription}"`);
     console.log(`[CPT_MATCHER] Additional context:`, JSON.stringify(additionalContext));
+    
+    if (extractedCode) {
+      console.log(`[CPT_MATCHER] Extracted CPT code provided: ${extractedCode}`);
+      
+      // Validate the extracted code format
+      const isValidCode = /^\d{5}$/.test(extractedCode) || /^[A-Z]\d{4}$/.test(extractedCode);
+      
+      if (isValidCode) {
+        // Look up the extracted code in the database
+        console.log(`[CPT_MATCHER] Looking up extracted code in database: ${extractedCode}`);
+        const codeMatch = await lookupCPTCode(extractedCode);
+        
+        if (codeMatch) {
+          console.log(`[CPT_MATCHER] Found extracted code in database: ${extractedCode}`);
+          return {
+            ...codeMatch,
+            matchMethod: 'extracted_code'
+          };
+        } else {
+          console.log(`[CPT_MATCHER] Extracted code not found in database: ${extractedCode}`);
+        }
+      } else {
+        console.log(`[CPT_MATCHER] Extracted code has invalid format: ${extractedCode}`);
+      }
+    }
     
     if (!serviceDescription) {
       console.warn('[CPT_MATCHER] Empty service description provided to matchServiceToCPT');
@@ -93,6 +119,42 @@ export async function matchServiceToCPT(serviceDescription, additionalContext = 
     return null;
   } catch (error) {
     console.error('[CPT_MATCHER] Error matching service to CPT:', error);
+    return null;
+  }
+}
+
+/**
+ * Look up a CPT code in the database
+ * @param {string} cptCode - The CPT code to look up
+ * @returns {Promise<object|null>} - The CPT code information or null
+ */
+async function lookupCPTCode(cptCode) {
+  try {
+    console.log(`[CPT_MATCHER_LOOKUP] Looking up CPT code: ${cptCode}`);
+    
+    // Query the database for the CPT code
+    const querySnapshot = await db.collection('cptCodeMappings')
+      .where('code', '==', cptCode)
+      .limit(1)
+      .get();
+    
+    if (querySnapshot.empty) {
+      console.log(`[CPT_MATCHER_LOOKUP] CPT code ${cptCode} not found in database`);
+      return null;
+    }
+    
+    const data = querySnapshot.docs[0].data();
+    console.log(`[CPT_MATCHER_LOOKUP] Found CPT code in database: ${data.code} - "${data.description}"`);
+    
+    return {
+      cptCode: data.code,
+      description: data.description,
+      confidence: 1.0, // High confidence since it's a direct code lookup
+      nonFacilityRate: data.nonFacilityRate || null,
+      facilityRate: data.facilityRate || null
+    };
+  } catch (error) {
+    console.error('[CPT_MATCHER_LOOKUP] Error looking up CPT code:', error);
     return null;
   }
 }

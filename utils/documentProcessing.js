@@ -456,10 +456,52 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
     
     console.log(`[CPT_ENHANCEMENT] Processing service ${i+1}/${services.length}: "${service.description}"`);
     
-    // Skip if service already has a valid CPT code
-    if (service.code && service.code !== 'Not found' && 
-        (/^\d{5}$/.test(service.code) || /^[A-Z]\d{4}$/.test(service.code))) {
+    // Check if service already has a valid CPT code
+    const hasValidCode = service.code && service.code !== 'Not found' && 
+                        (/^\d{5}$/.test(service.code) || /^[A-Z]\d{4}$/.test(service.code));
+    
+    if (hasValidCode) {
       console.log(`[CPT_ENHANCEMENT] Service already has a valid code: ${service.code}`);
+      
+      // Even if the service has a code, we still want to look it up to get reimbursement rates
+      // But we'll skip the matching process and use the extracted code directly
+      try {
+        // Prepare additional context for matching
+        const additionalContext = {
+          patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
+          serviceDate: service.date || null,
+        };
+        
+        // Use the extracted code for lookup
+        const match = await matchServiceToCPT(service.description, additionalContext, service.code);
+        
+        if (match) {
+          console.log(`[CPT_ENHANCEMENT] Found CPT code match using extracted code:`, JSON.stringify(match, null, 2));
+          enhancedService.codeDescription = match.description;
+          enhancedService.codeConfidence = match.confidence;
+          enhancedService.codeMatchMethod = match.matchMethod;
+          
+          // Determine facility type and add appropriate reimbursement rate
+          const facilityType = determineFacilityType(service, billInfo);
+          enhancedService.facilityType = facilityType;
+          
+          if (facilityType === 'facility' && match.facilityRate !== null) {
+            enhancedService.reimbursementRate = match.facilityRate;
+            enhancedService.reimbursementType = 'facility';
+          } else if (match.nonFacilityRate !== null) {
+            enhancedService.reimbursementRate = match.nonFacilityRate;
+            enhancedService.reimbursementType = 'non-facility';
+          }
+          
+          // Calculate potential savings
+          calculatePotentialSavings(enhancedService);
+        } else {
+          console.log(`[CPT_ENHANCEMENT] Extracted code ${service.code} not found in database`);
+        }
+      } catch (error) {
+        console.error('[CPT_ENHANCEMENT] Error looking up extracted CPT code:', error);
+      }
+      
       enhancedServices.push(enhancedService);
       continue;
     }
@@ -475,7 +517,8 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
     // Match service to CPT code
     console.log('[CPT_ENHANCEMENT] Calling matchServiceToCPT function');
     try {
-      const match = await matchServiceToCPT(service.description, additionalContext);
+      // Pass null as extractedCode since we already checked above
+      const match = await matchServiceToCPT(service.description, additionalContext, null);
       
       if (match) {
         console.log(`[CPT_ENHANCEMENT] Found CPT code match:`, JSON.stringify(match, null, 2));
@@ -497,20 +540,8 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
           enhancedService.reimbursementType = 'non-facility';
         }
         
-        // Calculate potential savings if we have both billed amount and reimbursement rate
-        if (enhancedService.reimbursementRate && enhancedService.amount) {
-          // Extract numeric amount from string like "$123.45"
-          const amountStr = enhancedService.amount.replace(/[^0-9.]/g, '');
-          const amount = parseFloat(amountStr);
-          
-          if (!isNaN(amount) && amount > 0) {
-            const savings = amount - enhancedService.reimbursementRate;
-            if (savings > 0) {
-              enhancedService.potentialSavings = savings;
-              enhancedService.savingsPercentage = (savings / amount) * 100;
-            }
-          }
-        }
+        // Calculate potential savings
+        calculatePotentialSavings(enhancedService);
       } else {
         console.log('[CPT_ENHANCEMENT] No CPT code match found');
         enhancedService.code = 'Not found';
@@ -528,6 +559,27 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
   
   console.log('[CPT_ENHANCEMENT] Enhanced services:', JSON.stringify(enhancedServices, null, 2));
   return enhancedServices;
+}
+
+/**
+ * Calculate potential savings for a service
+ * @param {object} service - The service object to calculate savings for
+ */
+function calculatePotentialSavings(service) {
+  // Calculate potential savings if we have both billed amount and reimbursement rate
+  if (service.reimbursementRate && service.amount) {
+    // Extract numeric amount from string like "$123.45"
+    const amountStr = service.amount.replace(/[^0-9.]/g, '');
+    const amount = parseFloat(amountStr);
+    
+    if (!isNaN(amount) && amount > 0) {
+      const savings = amount - service.reimbursementRate;
+      if (savings > 0) {
+        service.potentialSavings = savings;
+        service.savingsPercentage = (savings / amount) * 100;
+      }
+    }
+  }
 }
 
 /**
