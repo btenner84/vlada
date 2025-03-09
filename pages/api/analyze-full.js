@@ -11,43 +11,52 @@ import {
   enhancedAnalyzeWithAI
 } from '../../utils/documentProcessing';
 import { visionClient } from '../../utils/visionClient';
+import { matchServiceToCPT } from '../../utils/cptMatcher';
+import { adminDb as existingAdminDb, adminStorage as existingAdminStorage } from '../../firebase/admin';
 
-// Initialize Firebase Admin if it hasn't been initialized yet
-let adminDb;
-let adminStorage;
+// Use the existing Firebase Admin instance if available, otherwise initialize a new one
+let adminDb = existingAdminDb;
+let adminStorage = existingAdminStorage;
 
-if (!getApps().length) {
-  console.log('Initializing Firebase Admin SDK...');
-  try {
-    // Make sure to properly format the private key
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY
-      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      : undefined;
-    
-    console.log('Firebase Project ID:', process.env.FIREBASE_PROJECT_ID);
-    console.log('Firebase Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
-    console.log('Firebase Private Key (first 20 chars):', privateKey ? privateKey.substring(0, 20) + '...' : 'undefined');
-    
-    const app = initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: privateKey,
-      }),
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
-    });
-    
-    adminDb = getFirestore(app);
-    adminStorage = getStorage(app);
-    console.log('Firebase Admin SDK initialized successfully');
-  } catch (error) {
-    console.error('Error initializing Firebase Admin SDK:', error);
-    // Don't throw here, we'll handle the error in the handler
+// If the existing Firebase Admin instance is not available, initialize a new one
+if (!adminDb || !adminStorage) {
+  console.log('Existing Firebase Admin instance not available, initializing a new one...');
+  
+  if (!getApps().length) {
+    console.log('Initializing Firebase Admin SDK...');
+    try {
+      // Make sure to properly format the private key
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY
+        ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        : undefined;
+      
+      console.log('Firebase Project ID:', process.env.FIREBASE_PROJECT_ID);
+      console.log('Firebase Client Email:', process.env.FIREBASE_CLIENT_EMAIL);
+      console.log('Firebase Private Key (first 20 chars):', privateKey ? privateKey.substring(0, 20) + '...' : 'undefined');
+      
+      const app = initializeApp({
+        credential: cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: privateKey,
+        }),
+        storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      });
+      
+      adminDb = getFirestore(app);
+      adminStorage = getStorage(app);
+      console.log('Firebase Admin SDK initialized successfully');
+    } catch (error) {
+      console.error('Error initializing Firebase Admin SDK:', error);
+      // Don't throw here, we'll handle the error in the handler
+    }
+  } else {
+    console.log('Firebase Admin SDK already initialized');
+    adminDb = getFirestore();
+    adminStorage = getStorage();
   }
 } else {
-  console.log('Firebase Admin SDK already initialized');
-  adminDb = getFirestore();
-  adminStorage = getStorage();
+  console.log('Using existing Firebase Admin instance');
 }
 
 // Function to analyze a document

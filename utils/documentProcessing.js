@@ -4,6 +4,7 @@ import fetch from 'node-fetch';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeMedicalBillText } from './openaiClient';
+import { matchServiceToCPT } from './cptMatcher';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -279,6 +280,7 @@ export async function processWithLLM(text, isVerificationMode = false) {
         5. Maintain the exact structure shown above
         6. Do not add any additional fields
         7. Ensure the response is valid JSON that can be parsed
+        8. For each service, provide the CPT/HCPCS code if available in the bill
 
         MEDICAL BILL TEXT TO ANALYZE:
         ${text}
@@ -330,6 +332,11 @@ export async function processWithLLM(text, isVerificationMode = false) {
         if (!Array.isArray(parsedResponse.services) || parsedResponse.services.length === 0) {
           throw new Error('Services must be a non-empty array');
         }
+        
+        // Enhance services with CPT codes if they don't already have valid codes
+        console.log('Before CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
+        parsedResponse.services = await enhanceServicesWithCPTCodes(parsedResponse.services, parsedResponse.patientInfo);
+        console.log('After CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
       }
 
       return parsedResponse;
@@ -346,63 +353,162 @@ export async function processWithLLM(text, isVerificationMode = false) {
   }
 }
 
+/**
+ * Enhance services with CPT codes
+ * @param {Array} services - The services extracted from the bill
+ * @param {Object} patientInfo - The patient information from the bill
+ * @returns {Promise<Array>} - The enhanced services with CPT codes
+ */
+async function enhanceServicesWithCPTCodes(services, patientInfo) {
+  console.log('[CPT_ENHANCEMENT] Starting CPT code enhancement for services:', JSON.stringify(services, null, 2));
+  console.log('[CPT_ENHANCEMENT] Patient info available:', patientInfo ? 'Yes' : 'No');
+  
+  if (!services || services.length === 0) {
+    console.log('[CPT_ENHANCEMENT] No services to enhance');
+    return [];
+  }
+  
+  const enhancedServices = [];
+  
+  for (let i = 0; i < services.length; i++) {
+    const service = services[i];
+    // Create a copy of the service to avoid modifying the original
+    const enhancedService = { ...service };
+    
+    console.log(`[CPT_ENHANCEMENT] Processing service ${i+1}/${services.length}: "${service.description}"`);
+    
+    // Skip if service already has a valid CPT code
+    if (service.code && service.code !== 'Not found' && 
+        (/^\d{5}$/.test(service.code) || /^[A-Z]\d{4}$/.test(service.code))) {
+      console.log(`[CPT_ENHANCEMENT] Service already has a valid code: ${service.code}`);
+      enhancedServices.push(enhancedService);
+      continue;
+    }
+    
+    // Prepare additional context for matching
+    const additionalContext = {
+      patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
+      serviceDate: service.date || null,
+    };
+    
+    console.log(`[CPT_ENHANCEMENT] Additional context for matching:`, JSON.stringify(additionalContext));
+    
+    // Match service to CPT code
+    console.log('[CPT_ENHANCEMENT] Calling matchServiceToCPT function');
+    try {
+      const match = await matchServiceToCPT(service.description, additionalContext);
+      
+      if (match) {
+        console.log(`[CPT_ENHANCEMENT] Found CPT code match:`, JSON.stringify(match, null, 2));
+        enhancedService.code = match.cptCode;
+        enhancedService.codeDescription = match.description;
+        enhancedService.codeConfidence = match.confidence;
+        enhancedService.codeReasoning = match.reasoning;
+        enhancedService.codeMatchMethod = match.matchMethod;
+      } else {
+        console.log('[CPT_ENHANCEMENT] No CPT code match found');
+        enhancedService.code = 'Not found';
+        enhancedService.codeMatchMethod = 'no_match';
+      }
+    } catch (error) {
+      console.error('[CPT_ENHANCEMENT] Error matching service to CPT code:', error);
+      enhancedService.code = 'Error';
+      enhancedService.codeMatchMethod = 'error';
+      // Continue without CPT code - the service will be included without a code
+    }
+    
+    enhancedServices.push(enhancedService);
+  }
+  
+  console.log('[CPT_ENHANCEMENT] Enhanced services:', JSON.stringify(enhancedServices, null, 2));
+  return enhancedServices;
+}
+
+/**
+ * Calculate age from date of birth
+ * @param {string} dateOfBirth - The date of birth in any format
+ * @returns {number|null} - The age or null if invalid date
+ */
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth || dateOfBirth === 'Not found') return null;
+  
+  try {
+    // Try to parse the date
+    const dob = new Date(dateOfBirth);
+    if (isNaN(dob.getTime())) return null;
+    
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+    const monthDiff = today.getMonth() - dob.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
+      age--;
+    }
+    
+    return age;
+  } catch (error) {
+    console.error('Error calculating age:', error);
+    return null;
+  }
+}
+
 export async function enhancedAnalyzeWithAI(extractedText) {
-  console.log('Starting enhanced AI analysis of medical bill...');
+  console.log('[ENHANCED_ANALYSIS] Starting enhanced AI analysis of medical bill...');
   try {
     // First verify if it's a medical bill using existing function
-    console.log('Verifying if document is a medical bill...');
+    console.log('[ENHANCED_ANALYSIS] Verifying if document is a medical bill...');
     const verificationResult = await processWithLLM(extractedText, true);
-    console.log('Verification result:', verificationResult);
+    console.log('[ENHANCED_ANALYSIS] Verification result:', verificationResult);
 
     if (!verificationResult.isMedicalBill) {
-      console.log('Document is not a medical bill, skipping enhanced analysis');
+      console.log('[ENHANCED_ANALYSIS] Document is not a medical bill, skipping enhanced analysis');
       return {
         isMedicalBill: false,
-        reason: verificationResult.reason,
         confidence: verificationResult.confidence,
-        enhancedData: null
+        reason: verificationResult.reason
       };
     }
 
-    // If it is a medical bill, perform enhanced analysis with OpenAI
-    console.log('Document is a medical bill, performing enhanced analysis...');
-    const enhancedData = await analyzeMedicalBillText(extractedText);
-    console.log('Enhanced AI analysis complete');
-
-    // Map the enhanced data to our expected format structure
-    const mappedData = {
-      patientInfo: enhancedData.patientInfo || {},
-      billInfo: {
-        totalAmount: enhancedData.billing?.total_cost || enhancedData.billing?.totalCost || "Not found",
-        serviceDates: enhancedData.billing?.date_of_service || enhancedData.billing?.dateOfService || "Not found",
-        dueDate: enhancedData.billing?.due_date || enhancedData.billing?.dueDate || "Not found",
-        facilityName: enhancedData.providerInfo?.name || "Not found"
-      },
-      services: Array.isArray(enhancedData.services) ? enhancedData.services.map(service => ({
-        description: service.description || "Not found",
-        code: service.code || "Not found",
-        amount: service.cost || service.amount || "Not found",
-        details: service.details || "Not found"
-      })) : [{ description: "Not found", code: "Not found", amount: "Not found", details: "Not found" }],
-      insuranceInfo: enhancedData.insurance || {},
-      rawEnhancedData: enhancedData // Include the raw data for debugging
-    };
-
-    return {
-      isMedicalBill: true,
-      confidence: verificationResult.confidence,
-      enhancedData: mappedData
-    };
-  } catch (error) {
-    console.error('Enhanced AI analysis error:', error);
-    error.step = 'enhanced_ai_analysis';
-    error.details = error.message;
+    // If it is a medical bill, perform enhanced analysis
+    console.log('[ENHANCED_ANALYSIS] Document is a medical bill, performing enhanced analysis...');
     
-    // Return a partial result with the error
+    // Use OpenAI to extract structured data
+    console.log('[ENHANCED_ANALYSIS] Starting OpenAI analysis of medical bill text...');
+    console.log(`[ENHANCED_ANALYSIS] Text length: ${extractedText.length} characters`);
+    
+    try {
+      const enhancedData = await processWithLLM(extractedText, false);
+      console.log('[ENHANCED_ANALYSIS] OpenAI analysis completed successfully');
+      console.log('[ENHANCED_ANALYSIS] Raw extracted data:', JSON.stringify(enhancedData, null, 2));
+      
+      // Check if services were extracted
+      if (enhancedData.services && enhancedData.services.length > 0) {
+        console.log(`[ENHANCED_ANALYSIS] Found ${enhancedData.services.length} services, will enhance with CPT codes`);
+      } else {
+        console.log('[ENHANCED_ANALYSIS] No services found in extracted data, skipping CPT enhancement');
+      }
+      
+      return {
+        isMedicalBill: true,
+        confidence: verificationResult.confidence,
+        reason: verificationResult.reason,
+        enhancedData
+      };
+    } catch (analysisError) {
+      console.error('[ENHANCED_ANALYSIS] Error in OpenAI analysis:', analysisError);
+      return {
+        isMedicalBill: true,
+        confidence: verificationResult.confidence,
+        reason: verificationResult.reason,
+        error: analysisError.message
+      };
+    }
+  } catch (error) {
+    console.error('[ENHANCED_ANALYSIS] Error in enhanced analysis:', error);
     return {
-      isMedicalBill: true, // Assume we already verified it before the error
-      error: error.message,
-      enhancedData: null
+      isMedicalBill: false,
+      confidence: 'low',
+      reason: `Error during analysis: ${error.message}`
     };
   }
 }
