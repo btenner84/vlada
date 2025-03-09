@@ -901,17 +901,28 @@ export default function BillAnalysis() {
       console.log(`Updating bill ${billId} with:`, updateData);
       await updateDoc(billRef, updateData);
       
+      // Double-check that the update was successful
+      const updatedBillDoc = await getDoc(billRef);
+      const updatedData = updatedBillDoc.data();
+      console.log(`Updated bill data for ${billId}:`, {
+        hasAnalyzedAt: !!updatedData.analyzedAt,
+        status: updatedData.status
+      });
+      
       console.log(`Successfully updated bill ${billId}. Navigating to dashboard...`);
       
-      // Add a small delay to ensure Firestore has time to update
+      // Add a longer delay to ensure Firestore has time to update
+      // This is especially important in production environments
       setTimeout(() => {
         // Use router.push for programmatic navigation
         router.push('/dashboard');
-      }, 500);
+      }, 1500); // Increased from 500ms to 1500ms
     } catch (error) {
       console.error('Error updating bill before navigation:', error);
-      // Navigate anyway, even if the update fails
-      router.push('/dashboard');
+      // Add a delay even if the update fails
+      setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
     }
   };
 

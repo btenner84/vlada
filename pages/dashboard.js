@@ -28,6 +28,7 @@ export default function Dashboard() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showAllUploads, setShowAllUploads] = useState(false);
   const [showAllAnalyzedBills, setShowAllAnalyzedBills] = useState(false);
+  const [lastRefreshTime, setLastRefreshTime] = useState(Date.now());
 
   const fetchUploads = useCallback(async () => {
     if (!user) return;
@@ -64,7 +65,7 @@ export default function Dashboard() {
 
     console.log('Fetching analyzed bills for user:', user.uid);
     try {
-      // Query for bills that have either analyzedAt field or status='analyzed'
+      // Query for all bills belonging to the user
       const q = query(
         collection(db, 'bills'),
         where('userId', '==', user.uid)
@@ -78,16 +79,28 @@ export default function Dashboard() {
           const data = doc.data();
           console.log('Processing bill:', doc.id, data);
           
-          // Only include bills that have been analyzed
-          // Check for either analyzedAt field or status='analyzed'
-          if (!data.analyzedAt && data.status !== 'analyzed') {
-            console.log(`Bill ${doc.id} skipped - not analyzed yet (no analyzedAt field and status is not 'analyzed')`);
+          // Consider a bill analyzed if ANY of these conditions are true:
+          // 1. It has an analyzedAt field
+          // 2. Its status is 'analyzed'
+          // 3. It has extractedData (which means analysis completed)
+          const isAnalyzed = 
+            !!data.analyzedAt || 
+            data.status === 'analyzed' || 
+            !!data.extractedData;
+          
+          if (!isAnalyzed) {
+            console.log(`Bill ${doc.id} skipped - not analyzed yet:`, {
+              hasAnalyzedAt: !!data.analyzedAt,
+              status: data.status,
+              hasExtractedData: !!data.extractedData
+            });
             return null;
           }
 
           console.log(`Bill ${doc.id} is analyzed:`, {
             hasAnalyzedAt: !!data.analyzedAt,
             status: data.status,
+            hasExtractedData: !!data.extractedData,
             fileName: data.fileName
           });
 
@@ -95,6 +108,15 @@ export default function Dashboard() {
           let analyzedAt = data.analyzedAt;
           if (data.analyzedAt && typeof data.analyzedAt.toDate === 'function') {
             analyzedAt = data.analyzedAt.toDate().toISOString();
+          } else if (!analyzedAt && data.uploadedAt) {
+            // If no analyzedAt but we have uploadedAt, use that as a fallback
+            analyzedAt = data.uploadedAt;
+            if (typeof data.uploadedAt.toDate === 'function') {
+              analyzedAt = data.uploadedAt.toDate().toISOString();
+            }
+          } else if (!analyzedAt) {
+            // Last resort: use current time
+            analyzedAt = new Date().toISOString();
           }
 
           return {
@@ -166,7 +188,30 @@ export default function Dashboard() {
       unsubscribe();
       window.removeEventListener('resize', handleResize);
     };
-  }, [router, fetchUploads, fetchAnalyzedBills]);
+  }, [router, fetchUploads, fetchAnalyzedBills, lastRefreshTime]);
+
+  // Add this useEffect to listen for router events
+  useEffect(() => {
+    // Function to refresh data when returning to the dashboard
+    const handleRouteChange = (url) => {
+      console.log('Route changed to:', url);
+      if (url === '/dashboard') {
+        console.log('Returned to dashboard, refreshing data...');
+        // Set a small delay to ensure Firestore has the latest data
+        setTimeout(() => {
+          setLastRefreshTime(Date.now());
+        }, 1000);
+      }
+    };
+
+    // Subscribe to router events
+    router.events.on('routeChangeComplete', handleRouteChange);
+
+    // Cleanup
+    return () => {
+      router.events.off('routeChangeComplete', handleRouteChange);
+    };
+  }, [router]);
 
   // Add a new useEffect to refresh data when returning to the dashboard
   useEffect(() => {

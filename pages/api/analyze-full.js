@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import * as admin from 'firebase-admin';
 import fetch from 'node-fetch';
 import {
   detectFileType,
@@ -150,6 +151,33 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
         console.log('Document is a medical bill, extracting data using standard method...');
         extractedData = await processWithLLM(extractedText, false);
         console.log('Standard data extraction complete');
+      }
+    }
+    
+    // Update the bill document in Firestore
+    if (billId !== 'client-request' && userId !== 'client-request') {
+      console.log(`Updating bill document ${billId} in Firestore...`);
+      try {
+        const billRef = adminDb.collection('bills').doc(billId);
+        
+        // Update with all the analysis results
+        await billRef.update({
+          extractedText,
+          extractedData,
+          isMedicalBill: enhancedAnalysisResult.isMedicalBill,
+          confidence: enhancedAnalysisResult.confidence,
+          reason: enhancedAnalysisResult.reason,
+          analyzedAt: admin.firestore.FieldValue.serverTimestamp(),
+          status: 'analyzed',
+          fileType,
+          enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false,
+          processingMethod: enhancedAnalysisResult.enhancedData ? 'enhanced-ai' : 'server'
+        });
+        
+        console.log(`Successfully updated bill document ${billId} in Firestore`);
+      } catch (updateError) {
+        console.error(`Error updating bill document ${billId} in Firestore:`, updateError);
+        // Continue even if update fails - the client will handle it
       }
     }
     
