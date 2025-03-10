@@ -1427,46 +1427,58 @@ export default function BillAnalysis() {
                               </span>
                             </div>
                             
-                              {/* Reasonable price */}
-                            <div style={{
-                              display: "flex",
+                              {/* Updated Medicare/Lab Rate section */}
+                              <div style={{
+                                display: "flex",
                                 flexDirection: "column",
-                              gap: "0.5rem",
+                                gap: "0.5rem",
                                 flex: "1",
                                 padding: isMobile ? "0" : "0 1rem",
                                 borderRight: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)",
                                 borderTop: isMobile ? "1px solid rgba(59, 130, 246, 0.15)" : "none",
                                 paddingTop: isMobile ? "1rem" : "0",
                                 marginTop: isMobile ? "0.5rem" : "0"
-                            }}>
-                              <span style={{ 
+                              }}>
+                                <span style={{ 
                                   fontSize: "0.75rem",
-                                color: "#94A3B8", 
+                                  color: "#94A3B8",
                                   fontWeight: "500",
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em"
                                 }}>
-                                  Medicare Rate
+                                  {service.category === 'Lab and Diagnostic Tests' ? 'Lab Fee Schedule' : 'Medicare Rate'}
                                 </span>
-                              <span style={{ 
+                                <span style={{ 
                                   fontSize: isMobile ? "1.25rem" : "1.5rem",
                                   fontWeight: "700",
                                   color: "#10B981",
                                 }}>
-                                  {service.reimbursementRate 
-                                    ? `$${service.reimbursementRate.toFixed(2)}` 
-                                    : "Not available"}
-                                  {service.reimbursementType && (
-                                    <span style={{ 
-                                      fontSize: "0.75rem",
-                                      color: "#94A3B8",
-                                      marginLeft: "0.5rem",
-                                      fontWeight: "normal"
-                                    }}>
-                                      ({service.reimbursementType})
-                                    </span>
+                                  {service.category === 'Lab and Diagnostic Tests' ? (
+                                    <div>
+                                      {service.labRate || service.reimbursementRate ? (
+                                        <div className="text-green-500 font-semibold">
+                                          ${(service.labRate || service.reimbursementRate).toFixed(2)}
+                                          <span className="text-xs text-gray-400 ml-1">(lab)</span>
+                                        </div>
+                                      ) : (
+                                        <div className="text-gray-400">Not available <span className="text-xs">(lab)</span></div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div>
+                                      {service.reimbursementRate ? (
+                                        <div className="text-green-500 font-semibold">
+                                          ${service.reimbursementRate.toFixed(2)}
+                                          <span className="text-xs text-gray-400 ml-1">
+                                            ({service.reimbursementType})
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <div className="text-gray-400">Not available</div>
+                                      )}
+                                    </div>
                                   )}
-                              </span>
+                                </span>
                               </div>
                               
                               {/* Overcharge indicator */}

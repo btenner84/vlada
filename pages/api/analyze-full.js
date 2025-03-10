@@ -60,6 +60,28 @@ if (!adminDb || !adminStorage) {
   console.log('Using existing Firebase Admin instance');
 }
 
+// Add this function before the analyzeDocument function
+function sanitizeForFirestore(obj) {
+  if (obj === undefined || obj === null) {
+    return null;
+  }
+  
+  if (typeof obj !== 'object') {
+    return obj;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeForFirestore(item));
+  }
+  
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    sanitized[key] = sanitizeForFirestore(value);
+  }
+  
+  return sanitized;
+}
+
 // Function to analyze a document
 const analyzeDocument = async (fileUrl, userId, billId) => {
   console.log(`Starting document analysis for bill ${billId} from user ${userId}`);
@@ -164,19 +186,23 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
         const now = new Date();
         
         // Update with all the analysis results
-        await billRef.update({
-          extractedText,
-          extractedData,
+        const sanitizedData = sanitizeForFirestore({
+          extractedData: extractedData,
           isMedicalBill: enhancedAnalysisResult.isMedicalBill,
+          processingMethod: enhancedAnalysisResult.enhancedData ? 'enhanced-ai' : 'server',
+          extractedText: extractedText,
           confidence: enhancedAnalysisResult.confidence,
           reason: enhancedAnalysisResult.reason,
-          // Use both timestamp formats for maximum compatibility
           analyzedAt: admin.firestore.FieldValue.serverTimestamp(),
-          analyzedAtString: now.toISOString(), // Add a string version as backup
+          analyzedAtString: now.toISOString(),
           status: 'analyzed',
-          fileType,
-          enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false,
-          processingMethod: enhancedAnalysisResult.enhancedData ? 'enhanced-ai' : 'server'
+          fileType: fileType,
+          enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false
+        });
+        
+        await billRef.update({
+          ...sanitizedData,
+          lastUpdated: admin.firestore.FieldValue.serverTimestamp()
         });
         
         console.log(`Successfully updated bill document ${billId} in Firestore with timestamp: ${now.toISOString()}`);

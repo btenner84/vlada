@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeMedicalBillText } from './openaiClient';
 import { matchServiceToCPT } from './cptMatcher';
+import { matchServiceToLab } from './labMatcher';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -669,55 +670,98 @@ async function categorizeService(service) {
  * @returns {Promise<Array>} - The enhanced services with CPT codes
  */
 async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
-  console.log('[CPT_ENHANCEMENT] Starting CPT code enhancement for services:', JSON.stringify(services, null, 2));
-  console.log('[CPT_ENHANCEMENT] Patient info available:', patientInfo ? 'Yes' : 'No');
-  console.log('[CPT_ENHANCEMENT] Bill info available:', billInfo ? 'Yes' : 'No');
-  
-  if (!services || services.length === 0) {
-    console.log('[CPT_ENHANCEMENT] No services to enhance');
-    return [];
-  }
+  console.log('[SERVICE_ENHANCEMENT] Starting service enhancement for services:', JSON.stringify(services, null, 2));
   
   const enhancedServices = [];
   
-  // Process services sequentially to handle async categorization
+  // Create additional context from patient and bill info
+  const additionalContext = {
+    patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
+    facilityName: billInfo?.facilityName || null,
+    serviceDate: billInfo?.serviceDates || null
+  };
+  
+  console.log('[SERVICE_ENHANCEMENT] Using additional context:', additionalContext);
+  
   for (let i = 0; i < services.length; i++) {
     const service = services[i];
-    // Create a copy of the service to avoid modifying the original
-    const enhancedService = { ...service };
+    console.log(`[SERVICE_ENHANCEMENT] Processing service ${i + 1}/${services.length}:`, service);
     
-    console.log(`[CPT_ENHANCEMENT] Processing service ${i+1}/${services.length}: "${service.description}"`);
-    
-    // First, categorize the service based on description
-    const categoryResult = await categorizeService(enhancedService);
-    enhancedService.category = categoryResult.category;
-    enhancedService.categoryReasoning = categoryResult.reasoning;
-    console.log(`[CPT_ENHANCEMENT] Categorized service as: ${enhancedService.category}`);
-    
-    // Check if service already has a valid CPT code
-    const hasValidCode = service.code && service.code !== 'Not found' && 
-                        (/^\d{5}$/.test(service.code) || /^[A-Z]\d{4}$/.test(service.code));
-    
-    if (hasValidCode) {
-      console.log(`[CPT_ENHANCEMENT] Service already has a valid code: ${service.code}`);
+    const enhancedService = {
+      ...service,
+      codeConfidence: null,
+      codeMatchMethod: null,
+      reimbursementRate: null,
+      reimbursementType: null,
+      potentialSavings: null,
+      labRate: null
+    };
+
+    try {
+      // First, categorize the service if it doesn't have a category
+      if (!enhancedService.category) {
+        const categoryResult = await categorizeService(enhancedService);
+        enhancedService.category = categoryResult.category;
+        enhancedService.categoryReasoning = categoryResult.reasoning;
+      }
+
+      // Check if this is a lab service
+      const isLabService = enhancedService.category === 'Lab and Diagnostic Tests' &&
+        !enhancedService.description.toLowerCase().includes('x-ray') &&
+        !enhancedService.description.toLowerCase().includes('imaging') &&
+        !enhancedService.description.toLowerCase().includes('scan');
+
+      console.log(`[SERVICE_ENHANCEMENT] Service category: ${enhancedService.category}, isLabService: ${isLabService}`);
+
+      // Check if the service already has a valid code
+      const hasValidCode = service.code && /^[0-9A-Z]{4,5}$/.test(service.code);
+      console.log(`[SERVICE_ENHANCEMENT] Has valid code: ${hasValidCode}, code: ${service.code}`);
+
+      let match = null;
       
-      // Even if the service has a code, we still want to look it up to get reimbursement rates
-      // But we'll skip the matching process and use the extracted code directly
-      try {
-        // Prepare additional context for matching
-        const additionalContext = {
-          patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
-          serviceDate: service.date || null,
-          category: enhancedService.category // Pass the category to the matcher
-        };
-        
-        // Use the extracted code for lookup
-        const match = await matchServiceToCPT(service.description, additionalContext, service.code);
+      if (isLabService) {
+        // Use lab matcher for lab services
+        console.log('[SERVICE_ENHANCEMENT] Using lab matcher for service:', service.description);
+        match = await matchServiceToLab(
+          service.description,
+          additionalContext,
+          hasValidCode ? service.code : null
+        );
         
         if (match) {
-          console.log(`[CPT_ENHANCEMENT] Found CPT code match using extracted code:`, JSON.stringify(match, null, 2));
+          console.log('[SERVICE_ENHANCEMENT] Lab match found:', match);
+          enhancedService.code = match.labCode;
+          enhancedService.codeDescription = match.description;
+          enhancedService.detailedDescription = match.detailedDescription;
+          enhancedService.codeConfidence = match.confidence;
+          enhancedService.codeReasoning = match.reasoning;
+          enhancedService.codeMatchMethod = `lab_${match.matchMethod}`;
+          enhancedService.labRate = match.rate;
+          enhancedService.reimbursementRate = match.rate;
+          enhancedService.reimbursementType = 'lab';
+          
+          // Calculate potential savings for lab services
+          if (match.rate && service.amount) {
+            calculatePotentialSavings(enhancedService);
+          }
+        } else {
+          console.log('[SERVICE_ENHANCEMENT] No lab match found for:', service.description);
+        }
+      } else {
+        // Use CPT matcher for non-lab services
+        console.log('[SERVICE_ENHANCEMENT] Using CPT matcher for service:', service.description);
+        match = await matchServiceToCPT(
+          service.description,
+          additionalContext,
+          hasValidCode ? service.code : null
+        );
+        
+        if (match) {
+          console.log('[SERVICE_ENHANCEMENT] CPT match found:', match);
+          enhancedService.code = match.cptCode;
           enhancedService.codeDescription = match.description;
           enhancedService.codeConfidence = match.confidence;
+          enhancedService.codeReasoning = match.reasoning;
           enhancedService.codeMatchMethod = match.matchMethod;
           
           // Determine facility type and add appropriate reimbursement rate
@@ -732,72 +776,24 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.reimbursementType = 'non-facility';
           }
           
-          // Calculate potential savings
-          calculatePotentialSavings(enhancedService);
+          // Calculate potential savings for non-lab services
+          if (enhancedService.reimbursementRate !== null && service.amount) {
+            calculatePotentialSavings(enhancedService);
+          }
         } else {
-          console.log(`[CPT_ENHANCEMENT] Extracted code ${service.code} not found in database`);
+          console.log('[SERVICE_ENHANCEMENT] No CPT match found for:', service.description);
         }
-      } catch (error) {
-        console.error('[CPT_ENHANCEMENT] Error looking up extracted CPT code:', error);
       }
-      
-      enhancedServices.push(enhancedService);
-      continue;
-    }
-    
-    // Prepare additional context for matching
-    const additionalContext = {
-      patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
-      serviceDate: service.date || null,
-      category: enhancedService.category // Pass the category to the matcher
-    };
-    
-    console.log(`[CPT_ENHANCEMENT] Additional context for matching:`, JSON.stringify(additionalContext));
-    
-    // Match service to CPT code
-    console.log('[CPT_ENHANCEMENT] Calling matchServiceToCPT function');
-    try {
-      // Pass null as extractedCode since we already checked above
-      const match = await matchServiceToCPT(service.description, additionalContext, null);
-      
-      if (match) {
-        console.log(`[CPT_ENHANCEMENT] Found CPT code match:`, JSON.stringify(match, null, 2));
-        enhancedService.code = match.cptCode;
-        enhancedService.codeDescription = match.description;
-        enhancedService.codeConfidence = match.confidence;
-        enhancedService.codeReasoning = match.reasoning;
-        enhancedService.codeMatchMethod = match.matchMethod;
-        
-        // Determine facility type and add appropriate reimbursement rate
-        const facilityType = determineFacilityType(service, billInfo);
-        enhancedService.facilityType = facilityType;
-        
-        if (facilityType === 'facility' && match.facilityRate !== null) {
-          enhancedService.reimbursementRate = match.facilityRate;
-          enhancedService.reimbursementType = 'facility';
-        } else if (match.nonFacilityRate !== null) {
-          enhancedService.reimbursementRate = match.nonFacilityRate;
-          enhancedService.reimbursementType = 'non-facility';
-        }
-        
-        // Calculate potential savings
-        calculatePotentialSavings(enhancedService);
-      } else {
-        console.log('[CPT_ENHANCEMENT] No CPT code match found');
-        enhancedService.code = 'Not found';
-        enhancedService.codeMatchMethod = 'no_match';
-      }
+
     } catch (error) {
-      console.error('[CPT_ENHANCEMENT] Error matching service to CPT code:', error);
-      enhancedService.code = 'Error';
-      enhancedService.codeMatchMethod = 'error';
-      // Continue without CPT code - the service will be included without a code
+      console.error('[SERVICE_ENHANCEMENT] Error enhancing service:', error);
+      // Don't rethrow the error, continue processing other services
     }
     
+    console.log('[SERVICE_ENHANCEMENT] Enhanced service result:', enhancedService);
     enhancedServices.push(enhancedService);
   }
   
-  console.log('[CPT_ENHANCEMENT] Enhanced services:', JSON.stringify(enhancedServices, null, 2));
   return enhancedServices;
 }
 
@@ -806,19 +802,35 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
  * @param {object} service - The service object to calculate savings for
  */
 function calculatePotentialSavings(service) {
-  // Calculate potential savings if we have both billed amount and reimbursement rate
-  if (service.reimbursementRate && service.amount) {
-    // Extract numeric amount from string like "$123.45"
+  try {
+    // Extract numeric amount from the service amount string
     const amountStr = service.amount.replace(/[^0-9.]/g, '');
     const amount = parseFloat(amountStr);
     
-    if (!isNaN(amount) && amount > 0) {
-      const savings = amount - service.reimbursementRate;
-      if (savings > 0) {
-        service.potentialSavings = savings;
-        service.savingsPercentage = (savings / amount) * 100;
-      }
+    // Get the appropriate rate (lab rate or reimbursement rate)
+    const rate = service.category === 'Lab and Diagnostic Tests' 
+      ? (service.labRate || service.reimbursementRate) 
+      : service.reimbursementRate;
+    
+    if (isNaN(amount) || !rate) {
+      return;
     }
+    
+    // Calculate potential savings
+    if (amount > rate) {
+      service.potentialSavings = amount - rate;
+      service.savingsPercentage = (service.potentialSavings / amount) * 100;
+      
+      console.log(`[SAVINGS] Calculated savings for ${service.description}: 
+        Amount: $${amount}, 
+        Rate: $${rate}, 
+        Savings: $${service.potentialSavings.toFixed(2)} (${service.savingsPercentage.toFixed(2)}%)`);
+    } else {
+      service.potentialSavings = 0;
+      service.savingsPercentage = 0;
+    }
+  } catch (error) {
+    console.error('[SAVINGS] Error calculating potential savings:', error);
   }
 }
 
