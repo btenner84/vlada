@@ -315,4 +315,15 @@ export default async function handler(req, res) {
     console.error('Error in analyze-full endpoint:', error);
     res.status(500).json({ error: error.message || 'Error analyzing document' });
   }
-} 
+}
+
+// Add this export at the very end of the file, after the handler function
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '10mb', // Increase payload size limit
+    },
+    responseLimit: false, // Remove the response size limit
+  },
+  maxDuration: 60, // Allow 60 seconds for function execution
+}; 

@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 import fetch from 'node-fetch';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
-import { analyzeMedicalBillText } from './openaiClient';
+const { analyzeMedicalBillText } = require('./openaiClient');
 import { matchServiceToCPT } from './cptMatcher';
 import { matchServiceToLab } from './labMatcher';
 import { matchServiceToDrug } from './drugMatcher';
@@ -439,17 +439,22 @@ function determineFacilityType(service, billInfo) {
  * @returns {Promise<string>} - The category name
  */
 async function categorizeServiceWithOpenAI(service) {
-  try {
-    console.log(`[SERVICE_CATEGORIZATION_AI] Starting OpenAI categorization for: "${service.description}"`);
-    
-    // Extract relevant information
-    const description = service.description || '';
-    const codeDescription = service.codeDescription || '';
-    const code = service.code || '';
-    
-    // Create a prompt for OpenAI
-    const prompt = `I need to categorize this medical service into one of six predefined categories:
-    
+  const MAX_RETRIES = 3;
+  let retryCount = 0;
+  let lastError = null;
+
+  while (retryCount < MAX_RETRIES) {
+    try {
+      console.log(`[SERVICE_CATEGORIZATION_AI] Starting OpenAI categorization for: "${service.description}" (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      
+      // Extract relevant information
+      const description = service.description || '';
+      const codeDescription = service.codeDescription || '';
+      const code = service.code || '';
+      
+      // Create a prompt for OpenAI
+      const prompt = `I need to categorize this medical service into one of six predefined categories:
+      
 Service Description: "${description}"
 ${code ? `CPT/HCPCS Code: ${code}` : ''}
 ${codeDescription ? `Code Description: "${codeDescription}"` : ''}
@@ -469,50 +474,140 @@ Please categorize this service into one of these six categories. Respond in JSON
   "reasoning": "Brief explanation of why this category is appropriate"
 }`;
 
-    console.log('[SERVICE_CATEGORIZATION_AI] Calling OpenAI API for service categorization');
-    
-    // Call OpenAI API
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
-      messages: [
-        { 
-          role: 'system', 
-          content: 'You are a medical billing expert specializing in categorizing medical services. Your task is to categorize services into one of six predefined categories. Be precise and consider both the service description and CPT/HCPCS code if provided.' 
-        },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.2,
-      response_format: { type: "json_object" }
-    });
-    
-    // Parse the response
-    const result = JSON.parse(response.choices[0].message.content);
-    console.log('[SERVICE_CATEGORIZATION_AI] OpenAI response:', JSON.stringify(result, null, 2));
-    
-    // Validate the category
-    const validCategories = [
-      'Office visits and Consultations',
-      'Procedures and Surgeries',
-      'Lab and Diagnostic Tests',
-      'Drugs and Infusions',
-      'Medical Equipment',
-      'Hospital stays and emergency care visits'
-    ];
-    
-    if (!validCategories.includes(result.category)) {
-      console.warn('[SERVICE_CATEGORIZATION_AI] OpenAI returned invalid category:', result.category);
-      return { category: 'Other', reasoning: null };
+      console.log('[SERVICE_CATEGORIZATION_AI] Calling OpenAI API for service categorization');
+      
+      // Call OpenAI API with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      // Call OpenAI API
+      const response = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'You are a medical billing expert specializing in categorizing medical services. Your task is to categorize services into one of six predefined categories. Be precise and consider both the service description and CPT/HCPCS code if provided.' 
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.2,
+        response_format: { type: "json_object" }
+      }, { signal: controller.signal });
+      
+      clearTimeout(timeoutId);
+      
+      // Parse the response
+      const contentStr = response.choices[0]?.message?.content;
+      if (!contentStr) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      // Try to parse JSON with error handling
+      let result;
+      try {
+        result = JSON.parse(contentStr);
+      } catch (parseError) {
+        console.error('[SERVICE_CATEGORIZATION_AI] Failed to parse OpenAI response:', contentStr);
+        throw new Error(`Failed to parse OpenAI response: ${parseError.message}`);
+      }
+      
+      console.log('[SERVICE_CATEGORIZATION_AI] OpenAI response:', JSON.stringify(result, null, 2));
+      
+      // Validate the category
+      const validCategories = [
+        'Office visits and Consultations',
+        'Procedures and Surgeries',
+        'Lab and Diagnostic Tests',
+        'Drugs and Infusions',
+        'Medical Equipment',
+        'Hospital stays and emergency care visits'
+      ];
+      
+      if (!validCategories.includes(result.category)) {
+        console.warn('[SERVICE_CATEGORIZATION_AI] OpenAI returned invalid category:', result.category);
+        // Instead of returning immediately, let's map to the closest category
+        const defaultCategory = 'Other';
+        // Try to find the closest category
+        for (const validCategory of validCategories) {
+          if (result.category.toLowerCase().includes(validCategory.toLowerCase())) {
+            console.log(`[SERVICE_CATEGORIZATION_AI] Mapped invalid category "${result.category}" to "${validCategory}"`);
+            return { 
+              category: validCategory, 
+              reasoning: result.reasoning || `Mapped from "${result.category}"` 
+            };
+          }
+        }
+        return { category: defaultCategory, reasoning: null };
+      }
+      
+      console.log(`[SERVICE_CATEGORIZATION_AI] Categorized as "${result.category}" with confidence ${result.confidence}`);
+      return { 
+        category: result.category, 
+        reasoning: result.reasoning 
+      };
+    } catch (error) {
+      lastError = error;
+      console.error(`[SERVICE_CATEGORIZATION_AI] Error categorizing service with OpenAI (Attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
+      
+      // Implement exponential backoff
+      const backoffTime = Math.min(1000 * Math.pow(2, retryCount), 8000); // Max 8 second backoff
+      console.log(`[SERVICE_CATEGORIZATION_AI] Retrying in ${backoffTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, backoffTime));
+      
+      retryCount++;
     }
-    
-    console.log(`[SERVICE_CATEGORIZATION_AI] Categorized as "${result.category}" with confidence ${result.confidence}`);
-    return { 
-      category: result.category, 
-      reasoning: result.reasoning 
-    };
-  } catch (error) {
-    console.error('[SERVICE_CATEGORIZATION_AI] Error categorizing service with OpenAI:', error);
-    return { category: 'Other', reasoning: null };
   }
+
+  // After all retries failed, use a fallback method or return a default value
+  console.error(`[SERVICE_CATEGORIZATION_AI] All ${MAX_RETRIES} attempts failed. Last error:`, lastError);
+  
+  // Attempt to categorize based on description keywords as fallback
+  return fallbackCategorization(service);
+}
+
+/**
+ * Fallback categorization using keyword matching when OpenAI fails
+ */
+function fallbackCategorization(service) {
+  const description = (service.description || '').toLowerCase();
+  
+  // Define category keywords
+  const categoryKeywords = {
+    'Office visits and Consultations': ['office visit', 'consult', 'evaluation', 'exam', 'check-up', 'checkup'],
+    'Procedures and Surgeries': ['surgery', 'procedure', 'biopsy', 'repair', 'implant', 'removal'],
+    'Lab and Diagnostic Tests': ['lab', 'test', 'blood', 'urine', 'specimen', 'diagnostic', 'x-ray', 'scan', 'mri', 'ct'],
+    'Drugs and Infusions': ['drug', 'medication', 'injection', 'infusion', 'iv', 'vaccine', 'ondansetron', 'promethazine', 'famotidine'],
+    'Medical Equipment': ['equipment', 'supply', 'device', 'prosthetic', 'orthotic', 'brace'],
+    'Hospital stays and emergency care visits': ['emergency', 'er', 'hospital', 'inpatient', 'room', 'admission']
+  };
+  
+  // Check each category for matching keywords
+  for (const [category, keywords] of Object.entries(categoryKeywords)) {
+    for (const keyword of keywords) {
+      if (description.includes(keyword)) {
+        console.log(`[FALLBACK_CATEGORIZATION] Matched service to "${category}" based on keyword "${keyword}"`);
+        return {
+          category,
+          reasoning: `Fallback categorization based on keyword match: "${keyword}"`
+        };
+      }
+    }
+  }
+  
+  // If no keywords match, use the code to determine if it's a lab test
+  const code = (service.code || '').trim();
+  if (/^8\d{4}$/.test(code)) {
+    return {
+      category: 'Lab and Diagnostic Tests',
+      reasoning: 'Fallback categorization based on CPT code pattern for lab tests'
+    };
+  }
+  
+  // Default fallback
+  return { 
+    category: 'Other', 
+    reasoning: 'Unable to categorize with OpenAI or fallback methods'
+  };
 }
 
 /**

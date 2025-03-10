@@ -13,10 +13,14 @@
   "functions": {
     "pages/api/analyze-full.js": {
       "maxDuration": 60
+    },
+    "api/**/*.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [],
   "redirects": [],
   "cleanUrls": true,
-  "trailingSlash": false
+  "trailingSlash": false,
+  "crons": []
 } 
