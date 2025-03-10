@@ -319,11 +319,12 @@ export default async function handler(req, res) {
 
 // Add this export at the very end of the file, after the handler function
 export const config = {
+  runtime: 'edge',  // Use Edge Runtime for better performance
   api: {
     bodyParser: {
-      sizeLimit: '10mb', // Increase payload size limit
+      sizeLimit: '10mb',
     },
-    responseLimit: false, // Remove the response size limit
+    responseLimit: false,
   },
-  maxDuration: 60, // Allow 60 seconds for function execution
+  maxDuration: 300  // Increase to 5 minutes
 }; 

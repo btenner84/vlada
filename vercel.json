@@ -12,10 +12,12 @@
   ],
   "functions": {
     "pages/api/analyze-full.js": {
-      "maxDuration": 60
+      "maxDuration": 300,
+      "memory": 3008
     },
     "pages/api/**/*.js": {
-      "maxDuration": 60
+      "maxDuration": 300,
+      "memory": 3008
     }
   },
   "rewrites": [],
