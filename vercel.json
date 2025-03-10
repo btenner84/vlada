@@ -13,8 +13,7 @@
   "functions": {
     "pages/api/analyze-full.js": {
       "maxDuration": 300,
-      "memory": 3008,
-      "regions": ["iad1"]
+      "memory": 3008
     },
     "pages/api/**/*.js": {
       "maxDuration": 300,
