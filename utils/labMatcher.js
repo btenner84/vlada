@@ -301,11 +301,15 @@ Confidence: ${dbMatch.confidence.toFixed(2)}`;
       return null;
     }
 
+    // Look up the rate for this code
+    const rateInfo = await lookupLabCode(result.labCode);
+    
     return {
       labCode: result.labCode,
       description: result.description,
       confidence: result.confidence || 0.8,
-      reasoning: result.reasoning
+      reasoning: result.reasoning,
+      rate: rateInfo?.rate || null // Add the rate from lookup
     };
   } catch (error) {
     console.error('[LAB_MATCHER] Error finding match with OpenAI:', error);

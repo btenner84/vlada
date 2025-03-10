@@ -6,6 +6,8 @@ import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeMedicalBillText } from './openaiClient';
 import { matchServiceToCPT } from './cptMatcher';
 import { matchServiceToLab } from './labMatcher';
+import { matchServiceToDrug } from './drugMatcher';
+import { matchServiceToMedicare } from './medicareMatcher';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -514,152 +516,102 @@ Please categorize this service into one of these six categories. Respond in JSON
 }
 
 /**
- * Categorize a medical service into one of six predefined buckets
- * @param {object} service - The service object to categorize
- * @returns {Promise<string>} - The category name
+ * Categorize a service using its description or existing code
+ * @param {Object} service - The service to categorize
+ * @returns {Promise<Object>} The category and reasoning
  */
 async function categorizeService(service) {
-  console.log('[SERVICE_CATEGORIZATION] Categorizing service:', service.description);
-  
-  // Default category if we can't determine
-  let category = 'Other';
-  let reasoning = null;
-  
-  // Extract relevant information
-  const description = (service.description || '').toLowerCase();
-  const codeDescription = (service.codeDescription || '').toLowerCase();
-  const code = service.code || '';
-  
-  // Office visits and Consultations
-  const officeVisitKeywords = [
-    'office visit', 'consultation', 'consult', 'evaluation', 'assessment', 
-    'check up', 'check-up', 'checkup', 'exam', 'examination', 'visit', 
-    'follow up', 'follow-up', 'followup', 'preventive', 'wellness'
-  ];
-  
-  // Procedures and Surgeries
-  const procedureKeywords = [
-    'surgery', 'surgical', 'procedure', 'operation', 'removal', 'excision', 
-    'biopsy', 'repair', 'incision', 'implant', 'injection', 'catheter', 
-    'endoscopy', 'colonoscopy', 'arthroscopy'
-  ];
-  
-  // Lab and Diagnostic Tests
-  const labTestKeywords = [
-    'lab', 'laboratory', 'test', 'panel', 'screening', 'x-ray', 'xray', 
-    'imaging', 'scan', 'mri', 'ct', 'ultrasound', 'ekg', 'ecg', 'eeg', 
-    'diagnostic', 'analysis', 'blood', 'urine', 'specimen', 'culture'
-  ];
-  
-  // Drugs and Infusions
-  const drugKeywords = [
-    'drug', 'medication', 'infusion', 'injection', 'iv', 'dose', 'vaccine', 
-    'immunization', 'antibiotic', 'mg', 'ml', 'vial', 'solution', 'pharmacy'
-  ];
-  
-  // Medical Equipment
-  const equipmentKeywords = [
-    'equipment', 'device', 'supply', 'supplies', 'dme', 'prosthetic', 
-    'orthotic', 'brace', 'crutch', 'wheelchair', 'walker', 'monitor'
-  ];
-  
-  // Hospital stays and emergency care visits
-  const hospitalKeywords = [
-    'hospital', 'inpatient', 'admission', 'discharge', 'room', 'bed', 
-    'emergency', 'er', 'ed', 'icu', 'intensive care', 'observation', 'stay'
-  ];
-  
-  // Check description keywords first (prioritize description over code)
-  const combinedText = `${description} ${codeDescription}`;
-  
-  if (officeVisitKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Office visits and Consultations');
-    category = 'Office visits and Consultations';
-    reasoning = `The service description contains keywords related to office visits and consultations.`;
-    return { category, reasoning };
+  // If service already has a category, use it
+  if (service.category) {
+    return {
+      category: service.category,
+      reasoning: service.categoryReasoning || "Category already determined"
+    };
   }
   
-  if (procedureKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Procedures and Surgeries');
-    category = 'Procedures and Surgeries';
-    reasoning = `The service description contains keywords related to procedures and surgeries.`;
-    return { category, reasoning };
+  // Otherwise use OpenAI to categorize
+  return categorizeServiceWithOpenAI(service);
+}
+
+/**
+ * Use OpenAI to determine the most appropriate database for a service
+ * @param {Object} service - The service to categorize
+ * @param {Object} billContext - Additional context about the bill
+ * @returns {Promise<Object>} Database selection result
+ */
+async function determineServiceDatabase(service, billContext) {
+  try {
+    console.log('[DATABASE_SELECTION] Determining appropriate database for service:', service.description);
+
+    const prompt = `As a medical billing expert, determine the most appropriate pricing database for this medical service. Consider the service description, any codes present, and the overall context of the bill.
+
+Service Description: "${service.description}"
+${service.code ? `Service Code: ${service.code}` : ''}
+${service.amount ? `Amount Billed: ${service.amount}` : ''}
+
+Bill Context:
+${billContext.facilityType ? `Facility Type: ${billContext.facilityType}` : ''}
+${billContext.serviceLocation ? `Service Location: ${billContext.serviceLocation}` : ''}
+${billContext.billType ? `Bill Type: ${billContext.billType}` : ''}
+
+Available Databases:
+1. Medicare Physician Fee Schedule (PFS/CPT)
+   - Used for: Professional services, office visits, procedures, surgeries
+   - Code ranges: 99201-99499 (E&M), 10000-69999 (procedures)
+   - Context: Professional services, physician work
+
+2. Clinical Lab Fee Schedule (CLFS)
+   - Used for: Laboratory tests, pathology, some diagnostic procedures
+   - Code ranges: 80000-89999 (lab tests), 70000-79999 (diagnostic imaging)
+   - Context: Laboratory work, diagnostic testing
+
+3. Average Sales Price (ASP)
+   - Used for: Drugs, biologicals, injections, infusions
+   - Code ranges: J0000-J9999
+   - Context: Drug administration, medication costs
+
+Analyze the service and determine which database is most appropriate. Consider:
+1. The nature of the service (procedure, test, drug, etc.)
+2. The setting where it's typically performed
+3. Any clinical indicators in the description
+4. Standard medical billing practices
+
+Respond in JSON format:
+{
+  "selectedDatabase": "PFS|CLFS|ASP",
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation of why this database is most appropriate",
+  "suggestedCategory": "one of the six standard categories",
+  "expectedCodePattern": "regex pattern or range"
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a medical billing expert specializing in determining the appropriate pricing databases for medical services. Focus on accuracy and consider all aspects of the service.'
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log('[DATABASE_SELECTION] OpenAI determination:', result);
+
+    return {
+      database: result.selectedDatabase,
+      confidence: result.confidence,
+      reasoning: result.reasoning,
+      category: result.suggestedCategory,
+      codePattern: result.expectedCodePattern
+    };
+  } catch (error) {
+    console.error('[DATABASE_SELECTION] Error in database determination:', error);
+    return null;
   }
-  
-  if (labTestKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Lab and Diagnostic Tests');
-    category = 'Lab and Diagnostic Tests';
-    reasoning = `The service description contains keywords related to laboratory and diagnostic tests.`;
-    return { category, reasoning };
-  }
-  
-  if (drugKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Drugs and Infusions');
-    category = 'Drugs and Infusions';
-    reasoning = `The service description contains keywords related to drugs and infusions.`;
-    return { category, reasoning };
-  }
-  
-  if (equipmentKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Medical Equipment');
-    category = 'Medical Equipment';
-    reasoning = `The service description contains keywords related to medical equipment and supplies.`;
-    return { category, reasoning };
-  }
-  
-  if (hospitalKeywords.some(keyword => combinedText.includes(keyword))) {
-    console.log('[SERVICE_CATEGORIZATION] Categorized by keywords as: Hospital stays and emergency care visits');
-    category = 'Hospital stays and emergency care visits';
-    reasoning = `The service description contains keywords related to hospital stays and emergency care.`;
-    return { category, reasoning };
-  }
-  
-  // If we have a code, use it as a fallback for categorization
-  if (code) {
-    // Office visits and consultations (E&M codes)
-    if (/^992\d\d$/.test(code) || /^994\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Office visits and Consultations');
-      category = 'Office visits and Consultations';
-      reasoning = `CPT code ${code} is in the range for Evaluation and Management services, which are typically office visits and consultations.`;
-      return { category, reasoning };
-    }
-    
-    // Surgery codes
-    if (/^(10\d\d\d|11\d\d\d|19\d\d\d|2\d\d\d\d|3\d\d\d\d|4\d\d\d\d|5\d\d\d\d|6\d\d\d\d)$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Procedures and Surgeries');
-      category = 'Procedures and Surgeries';
-      reasoning = `CPT code ${code} is in the range for surgical procedures.`;
-      return { category, reasoning };
-    }
-    
-    // Lab and diagnostic codes
-    if (/^(8\d\d\d\d|9\d\d\d\d)$/.test(code) || /^(70\d\d\d|71\d\d\d|72\d\d\d|73\d\d\d|74\d\d\d|75\d\d\d|76\d\d\d|77\d\d\d|78\d\d\d)$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Lab and Diagnostic Tests');
-      category = 'Lab and Diagnostic Tests';
-      reasoning = `CPT code ${code} is in the range for laboratory and diagnostic testing services.`;
-      return { category, reasoning };
-    }
-    
-    // Drug codes (J codes)
-    if (/^J\d\d\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Drugs and Infusions');
-      category = 'Drugs and Infusions';
-      reasoning = `HCPCS code ${code} is a J-code, which is typically used for drugs and infusions.`;
-      return { category, reasoning };
-    }
-    
-    // Medical equipment (E codes, K codes)
-    if (/^[EK]\d\d\d\d$/.test(code)) {
-      console.log('[SERVICE_CATEGORIZATION] Categorized by CPT code pattern as: Medical Equipment');
-      category = 'Medical Equipment';
-      reasoning = `HCPCS code ${code} is an ${code[0]}-code, which is typically used for medical equipment and supplies.`;
-      return { category, reasoning };
-    }
-  }
-  
-  // If rule-based categorization failed, use OpenAI
-  console.log('[SERVICE_CATEGORIZATION] Rule-based categorization failed, using OpenAI');
-  return await categorizeServiceWithOpenAI(service);
 }
 
 /**
@@ -674,126 +626,140 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
   
   const enhancedServices = [];
   
-  // Create additional context from patient and bill info
-  const additionalContext = {
-    patientAge: patientInfo?.dateOfBirth ? calculateAge(patientInfo.dateOfBirth) : null,
-    facilityName: billInfo?.facilityName || null,
-    serviceDate: billInfo?.serviceDates || null
-  };
-  
-  console.log('[SERVICE_ENHANCEMENT] Using additional context:', additionalContext);
-  
   for (let i = 0; i < services.length; i++) {
     const service = services[i];
     console.log(`[SERVICE_ENHANCEMENT] Processing service ${i + 1}/${services.length}:`, service);
     
-    const enhancedService = {
-      ...service,
-      codeConfidence: null,
-      codeMatchMethod: null,
-      reimbursementRate: null,
-      reimbursementType: null,
-      potentialSavings: null,
-      labRate: null
-    };
-
     try {
-      // First, categorize the service if it doesn't have a category
-      if (!enhancedService.category) {
-        const categoryResult = await categorizeService(enhancedService);
-        enhancedService.category = categoryResult.category;
-        enhancedService.categoryReasoning = categoryResult.reasoning;
-      }
-
-      // Check if this is a lab service
-      const isLabService = enhancedService.category === 'Lab and Diagnostic Tests' &&
-        !enhancedService.description.toLowerCase().includes('x-ray') &&
-        !enhancedService.description.toLowerCase().includes('imaging') &&
-        !enhancedService.description.toLowerCase().includes('scan');
-
-      console.log(`[SERVICE_ENHANCEMENT] Service category: ${enhancedService.category}, isLabService: ${isLabService}`);
-
-      // Check if the service already has a valid code
-      const hasValidCode = service.code && /^[0-9A-Z]{4,5}$/.test(service.code);
-      console.log(`[SERVICE_ENHANCEMENT] Has valid code: ${hasValidCode}, code: ${service.code}`);
-
-      let match = null;
+      // Start by copying the service
+      const enhancedService = { ...service };
       
-      if (isLabService) {
-        // Use lab matcher for lab services
-        console.log('[SERVICE_ENHANCEMENT] Using lab matcher for service:', service.description);
-        match = await matchServiceToLab(
-          service.description,
-          additionalContext,
-          hasValidCode ? service.code : null
-        );
-        
-        if (match) {
-          console.log('[SERVICE_ENHANCEMENT] Lab match found:', match);
-          enhancedService.code = match.labCode;
-          enhancedService.codeDescription = match.description;
-          enhancedService.detailedDescription = match.detailedDescription;
-          enhancedService.codeConfidence = match.confidence;
-          enhancedService.codeReasoning = match.reasoning;
-          enhancedService.codeMatchMethod = `lab_${match.matchMethod}`;
-          enhancedService.labRate = match.rate;
-          enhancedService.reimbursementRate = match.rate;
-          enhancedService.reimbursementType = 'lab';
-          
-          // Calculate potential savings for lab services
-          if (match.rate && service.amount) {
-            calculatePotentialSavings(enhancedService);
-          }
-        } else {
-          console.log('[SERVICE_ENHANCEMENT] No lab match found for:', service.description);
-        }
-      } else {
-        // Use CPT matcher for non-lab services
-        console.log('[SERVICE_ENHANCEMENT] Using CPT matcher for service:', service.description);
-        match = await matchServiceToCPT(
-          service.description,
-          additionalContext,
-          hasValidCode ? service.code : null
-        );
-        
-        if (match) {
-          console.log('[SERVICE_ENHANCEMENT] CPT match found:', match);
-          enhancedService.code = match.cptCode;
-          enhancedService.codeDescription = match.description;
-          enhancedService.codeConfidence = match.confidence;
-          enhancedService.codeReasoning = match.reasoning;
-          enhancedService.codeMatchMethod = match.matchMethod;
-          
-          // Determine facility type and add appropriate reimbursement rate
-          const facilityType = determineFacilityType(service, billInfo);
-          enhancedService.facilityType = facilityType;
-          
-          if (facilityType === 'facility' && match.facilityRate !== null) {
-            enhancedService.reimbursementRate = match.facilityRate;
-            enhancedService.reimbursementType = 'facility';
-          } else if (match.nonFacilityRate !== null) {
-            enhancedService.reimbursementRate = match.nonFacilityRate;
-            enhancedService.reimbursementType = 'non-facility';
-          }
-          
-          // Calculate potential savings for non-lab services
-          if (enhancedService.reimbursementRate !== null && service.amount) {
-            calculatePotentialSavings(enhancedService);
-          }
-        } else {
-          console.log('[SERVICE_ENHANCEMENT] No CPT match found for:', service.description);
-        }
+      // Categorize the service if not already categorized
+    if (!enhancedService.category) {
+        const categoryResult = await categorizeService(service);
+      enhancedService.category = categoryResult.category;
+      enhancedService.categoryReasoning = categoryResult.reasoning;
+        console.log('[SERVICE_ENHANCEMENT] Service categorized as:', enhancedService.category);
       }
+      
+      // Handle different categories with their respective matchers
+      const category = enhancedService.category;
+      
+      switch (category) {
+        case 'Office visits and Consultations':
+        case 'Procedures and Surgeries':
+        case 'Hospital stays and emergency care visits':
+          console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for service');
+          const medicareMatch = await matchServiceToMedicare(service, {
+            category: enhancedService.category,
+            patientAge: patientInfo?.age,
+            serviceDate: service.date,
+            facilityType: billInfo?.facilityType
+          });
+          
+          if (medicareMatch) {
+            enhancedService.code = medicareMatch.code;
+            enhancedService.codeDescription = medicareMatch.description;
+            enhancedService.codeConfidence = medicareMatch.confidence;
+            enhancedService.codeReasoning = medicareMatch.reasoning;
+            enhancedService.codeMatchMethod = medicareMatch.matchMethod;
+            
+            const facilityType = determineFacilityType(service, billInfo);
+            enhancedService.facilityType = facilityType;
+            
+            if (facilityType === 'facility' && medicareMatch.facilityRate !== null) {
+              enhancedService.reimbursementRate = medicareMatch.facilityRate;
+              enhancedService.reimbursementType = 'facility';
+            } else if (medicareMatch.nonFacilityRate !== null) {
+              enhancedService.reimbursementRate = medicareMatch.nonFacilityRate;
+              enhancedService.reimbursementType = 'non-facility';
+            }
+          }
+          break;
 
-    } catch (error) {
-      console.error('[SERVICE_ENHANCEMENT] Error enhancing service:', error);
-      // Don't rethrow the error, continue processing other services
-    }
-    
-    console.log('[SERVICE_ENHANCEMENT] Enhanced service result:', enhancedService);
+        case 'Lab and Diagnostic Tests':
+          console.log('[SERVICE_ENHANCEMENT] Using Medicare CLFS database for Lab/Diagnostic');
+          const labMatch = await matchServiceToLab(service.description, {
+            category: enhancedService.category,
+            patientAge: patientInfo?.age,
+            serviceDate: service.date
+          });
+          
+          if (labMatch) {
+            enhancedService.code = labMatch.labCode;
+            enhancedService.codeDescription = labMatch.description;
+            enhancedService.codeConfidence = labMatch.confidence;
+            enhancedService.codeReasoning = labMatch.reasoning;
+            enhancedService.codeMatchMethod = labMatch.matchMethod;
+          enhancedService.reimbursementType = 'lab';
+            enhancedService.labRate = labMatch.rate;
+            
+            // Calculate potential savings
+            enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
+          }
+          break;
+
+        case 'Drugs and Infusions':
+          console.log('[SERVICE_ENHANCEMENT] Using Medicare ASP database for Drugs/Infusions');
+          const drugMatch = await matchServiceToDrug(service);
+          
+          console.log('[SERVICE_ENHANCEMENT] Drug match result:', drugMatch);
+          
+          if (drugMatch && drugMatch.matched) {
+            enhancedService.code = drugMatch.code;
+            enhancedService.codeDescription = drugMatch.description;
+            enhancedService.codeConfidence = drugMatch.confidence;
+            enhancedService.codeReasoning = drugMatch.reasoning;
+            enhancedService.codeMatchMethod = drugMatch.matchMethod;
+            enhancedService.reimbursementType = 'asp';
+            
+            // Set both original ASP price and ASP+6%
+            if (drugMatch.price) {
+              enhancedService.aspPrice = drugMatch.price;
+              enhancedService.reimbursementRate = drugMatch.price * 1.06;
+              console.log('[SERVICE_ENHANCEMENT] Set ASP price:', drugMatch.price, 'and ASP+6%:', enhancedService.reimbursementRate);
+              
+              // Calculate potential savings
+              enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
+              console.log('[SERVICE_ENHANCEMENT] Calculated savings:', enhancedService.potentialSavings);
+            }
+
+            // If the price was adjusted for dosage, include that information
+            if (drugMatch.dosageAdjusted) {
+              enhancedService.dosageAdjusted = true;
+              enhancedService.originalPrice = drugMatch.originalPrice;
+            }
+          }
+          break;
+
+        case 'Medical Equipment':
+          console.log(`[SERVICE_ENHANCEMENT] Category ${enhancedService.category} comparison coming soon`);
+          enhancedService.reimbursementRate = 'Coming Soon';
+          enhancedService.reimbursementType = 'not_implemented';
+          break;
+
+        default:
+          console.log('[SERVICE_ENHANCEMENT] Unknown category:', enhancedService.category);
+          break;
+      }
+      
+      // Calculate potential savings for all services that have a rate
+      // This ensures we don't miss any service types
+      if (!enhancedService.potentialSavings && 
+          (enhancedService.reimbursementRate || enhancedService.labRate)) {
+        enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
+      }
+      
+      // Add the enhanced service to the array
     enhancedServices.push(enhancedService);
+      console.log('[SERVICE_ENHANCEMENT] Enhanced service result:', enhancedService);
+    } catch (error) {
+      console.error(`[SERVICE_ENHANCEMENT] Error enhancing service ${i + 1}:`, error);
+      enhancedServices.push(service); // Add the original service in case of error
+    }
   }
   
+  console.log('After CPT enhancement, services:', JSON.stringify(enhancedServices, null, 2));
   return enhancedServices;
 }
 
@@ -803,34 +769,57 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
  */
 function calculatePotentialSavings(service) {
   try {
-    // Extract numeric amount from the service amount string
-    const amountStr = service.amount.replace(/[^0-9.]/g, '');
-    const amount = parseFloat(amountStr);
-    
-    // Get the appropriate rate (lab rate or reimbursement rate)
-    const rate = service.category === 'Lab and Diagnostic Tests' 
-      ? (service.labRate || service.reimbursementRate) 
-      : service.reimbursementRate;
-    
-    if (isNaN(amount) || !rate) {
-      return;
+    // Clean and convert the amount string to a number
+    if (!service.amount || typeof service.amount !== 'string') {
+      console.log('[SAVINGS_CALCULATION] Missing amount for service:', service.description);
+      return null;
     }
     
-    // Calculate potential savings
-    if (amount > rate) {
-      service.potentialSavings = amount - rate;
-      service.savingsPercentage = (service.potentialSavings / amount) * 100;
-      
-      console.log(`[SAVINGS] Calculated savings for ${service.description}: 
-        Amount: $${amount}, 
-        Rate: $${rate}, 
-        Savings: $${service.potentialSavings.toFixed(2)} (${service.savingsPercentage.toFixed(2)}%)`);
-    } else {
-      service.potentialSavings = 0;
-      service.savingsPercentage = 0;
+    const cleanAmount = service.amount.replace(/[$,]/g, '');
+    const billedAmount = parseFloat(cleanAmount);
+    
+    if (isNaN(billedAmount)) {
+      console.log('[SAVINGS_CALCULATION] Invalid amount format:', service.amount);
+      return null;
     }
+
+    let standardRate = null;
+    
+    // Determine which type of rate to use
+    if (service.category === 'Lab and Diagnostic Tests' && service.labRate) {
+      standardRate = parseFloat(service.labRate);
+    } else if (service.category === 'Drugs and Infusions' && service.reimbursementRate) {
+      standardRate = parseFloat(service.reimbursementRate);
+    } else if (service.reimbursementRate && service.reimbursementRate !== 'Coming Soon') {
+      if (typeof service.reimbursementRate === 'number') {
+        standardRate = service.reimbursementRate;
+      } else if (typeof service.reimbursementRate === 'string') {
+        standardRate = parseFloat(service.reimbursementRate.replace(/[$,]/g, ''));
+      }
+    }
+    
+    if (standardRate === null || isNaN(standardRate)) {
+      console.log('[SAVINGS_CALCULATION] No valid rate found for:', service.description);
+      return null;
+    }
+    
+    // Calculate the difference and potential savings percentage
+    const difference = billedAmount - standardRate;
+    const savingsPercentage = (difference / billedAmount) * 100;
+    
+    console.log(`[SAVINGS_CALCULATION] ${service.description}: Billed $${billedAmount}, Rate $${standardRate}, Diff $${difference}, Savings ${savingsPercentage.toFixed(2)}%`);
+    
+    // Return both the absolute savings and the percentage
+    return {
+      amount: difference > 0 ? difference : 0,
+      percentage: difference > 0 ? savingsPercentage : 0,
+      overchargeLevel: savingsPercentage > 75 ? 'high' : 
+                       savingsPercentage > 25 ? 'medium' : 
+                       savingsPercentage > 5 ? 'low' : 'none'
+    };
   } catch (error) {
-    console.error('[SAVINGS] Error calculating potential savings:', error);
+    console.error('[SAVINGS_CALCULATION] Error calculating savings:', error);
+    return null;
   }
 }
 
