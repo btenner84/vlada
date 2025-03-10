@@ -21,7 +21,6 @@
       "memory": 3008
     }
   },
-  "regions": ["iad1"],
   "rewrites": [],
   "redirects": [],
   "cleanUrls": true,
