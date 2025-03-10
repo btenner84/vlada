@@ -14,7 +14,7 @@
     "pages/api/analyze-full.js": {
       "maxDuration": 60
     },
-    "api/**/*.js": {
+    "pages/api/**/*.js": {
       "maxDuration": 60
     }
   },
