@@ -4,6 +4,10 @@ const nextConfig = {
   swcMinify: true,
   // Remove the standalone output for now
   // output: 'standalone',
+  serverRuntimeConfig: {
+    // Will only be available on the server side
+    PROJECT_ROOT: __dirname,
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {
@@ -12,12 +16,13 @@ const nextConfig = {
         path: false,
         stream: false,
         crypto: false,
+        'firebase-admin': false,
       };
     }
     return config;
   },
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch', '@google-cloud/vision']
+    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch', '@google-cloud/vision', 'firebase-admin']
   },
   images: {
     domains: ['firebasestorage.googleapis.com']

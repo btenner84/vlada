@@ -15,10 +15,35 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
 
-    // Allow authenticated users to access their own bills
+    // Allow authenticated users to access their own bills and their analyses
     match /bills/{billId} {
-      allow read, write: if isAuthenticated() && 
+      // Allow reading the bill document for permission checks
+      allow get: if isAuthenticated();
+      
+      allow read: if isAuthenticated() && 
         (resource == null || resource.data.userId == request.auth.uid);
+      allow write: if isAuthenticated() && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Simplified analyses subcollection rules
+      match /analyses/{analysisId} {
+        // Allow all operations if user owns the parent bill
+        allow read, write: if isAuthenticated() && 
+          get(/databases/$(database)/documents/bills/$(billId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // Allow authenticated users to read reference collections for code lookups
+    match /cptCodeMappings/{codeId} {
+      allow read: if isAuthenticated();
+    }
+
+    match /medicareCodes/{codeId} {
+      allow read: if isAuthenticated();
+    }
+
+    match /labCodes/{codeId} {
+      allow read: if isAuthenticated();
     }
 
     // Allow authenticated users to read and write to test collection (for testing only)

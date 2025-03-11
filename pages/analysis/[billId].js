@@ -126,22 +126,38 @@ export default function BillAnalysis() {
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      console.log('Auth state changed in analysis page:', user ? `User logged in: ${user.uid}` : 'No user');
       if (user) {
         setUser(user);
+        // Get the current ID token
+        try {
+          const token = await user.getIdToken();
+          console.log('Current user token available:', !!token);
+        } catch (tokenError) {
+          console.error('Error getting user token:', tokenError);
+        }
+        
         // Fetch user profile
         try {
+          console.log('Fetching user profile for:', user.uid);
           const profileDoc = await getDoc(doc(db, 'userProfiles', user.uid));
           if (profileDoc.exists()) {
+            console.log('User profile found');
             setUserProfile(profileDoc.data());
+          } else {
+            console.log('No user profile found');
           }
           if (billId) {
+            console.log('Fetching bill data for:', billId);
             await fetchBillData(billId, user);
             await fetchAnalysisVersions(billId);
           }
         } catch (error) {
-          console.error('Error fetching profile:', error);
+          console.error('Error in auth state change:', error);
+          setError(error.message);
         }
       } else {
+        console.log('No user found, redirecting to signin');
         router.push('/signin');
       }
       setIsLoading(false);
@@ -165,49 +181,67 @@ export default function BillAnalysis() {
   }, [router, billId]);
 
   const fetchBillData = async (id, currentUser) => {
+    console.log('Fetching bill data for:', id, 'User:', currentUser?.uid);
+    
     try {
-      const billDoc = await getDoc(doc(db, 'bills', id));
+      // Always get a fresh token before fetching
+      const token = await currentUser.getIdToken(true);
+      console.log('Fresh token obtained:', !!token);
+      
+      // Get the bill document
+      const billRef = doc(db, 'bills', id);
+      const billDoc = await getDoc(billRef);
+      
       if (!billDoc.exists()) {
         throw new Error('Bill not found');
       }
-      const data = { ...billDoc.data(), id };
-      setBillData(data);
       
-      // Test the API endpoint
-      try {
-        console.log('Testing API endpoint...');
-        const testResponse = await fetch(`${window.location.origin}/api/test`, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-          }
-        });
-        
-        if (testResponse.ok) {
-          const testData = await testResponse.json();
-          console.log('Test API response:', testData);
-        } else {
-          console.log('Test API failed:', testResponse.status);
-        }
-      } catch (testError) {
-        console.error('Test API error:', testError);
-      }
+      const data = { id: billDoc.id, ...billDoc.data() };
+      console.log('Bill data retrieved successfully:', data);
+      
+      // Test API endpoint
+      console.log('Testing API endpoint...');
+      const testResponse = await fetch('/api/test');
+      const testData = await testResponse.json();
+      console.log('Test API response:', testData);
+      
+      // Set the data
+      setBillData(data);
       
       // Start extraction if not already done
       if (!data.extractedData) {
-        startDataExtraction(data, currentUser);
+        await startDataExtraction(data, currentUser);
       } else {
         setExtractedData(data.extractedData);
         setIsMedicalBill(data.isMedicalBill);
         setAnalysisStatus('complete');
         setProcessingMethod(data.processingMethod || 'server');
-        if (data.extractedText) {
-          setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
-        }
+        setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
       }
     } catch (error) {
       console.error('Error fetching bill:', error);
+      setError(error.message);
       setAnalysisStatus('error');
+      
+      // If it's a permissions error, try to refresh the token and retry
+      if (error.code === 'permission-denied') {
+        try {
+          console.log('Permission denied, attempting token refresh...');
+          const newToken = await currentUser.getIdToken(true);
+          console.log('New token obtained:', !!newToken);
+          
+          // Force auth state refresh
+          await auth.currentUser.reload();
+          console.log('Auth state refreshed');
+          
+          // Retry the fetch with new token
+          await fetchBillData(id, currentUser);
+        } catch (tokenError) {
+          console.error('Token refresh failed:', tokenError);
+          // If token refresh fails, redirect to sign in
+          router.push('/signin');
+        }
+      }
     }
   };
 
@@ -283,362 +317,121 @@ export default function BillAnalysis() {
     console.log('Starting analysis with data:', billData);
     
     try {
+      if (!currentUser) {
+        throw new Error('No authenticated user');
+      }
+
+      // Get a fresh token before starting
+      const token = await currentUser.getIdToken(true);
+      console.log('Using fresh token for analysis:', !!token);
+
+      if (!billData || !billId) {
+        throw new Error('Missing bill data or bill ID');
+      }
+
       setProcessingMethod('');
+      setAnalysisStatus('processing');
       
-      // Create a new analysis version ID
-      const analysesRef = collection(db, 'bills', billData.id, 'analyses');
-      const existingAnalyses = await getDocs(analysesRef);
-      const versionNumber = existingAnalyses.size + 1;
-      const versionId = `analysis_${versionNumber.toString().padStart(2, '0')}`;
+      // First verify we can access the bill
+      const billRef = doc(db, 'bills', billId);
+      const billSnapshot = await getDoc(billRef);
       
-      // Create the new analysis document
-      const newAnalysisRef = doc(analysesRef, versionId);
+      if (!billSnapshot.exists()) {
+        throw new Error('Bill not found');
+      }
       
-      // Get user profile data for insurance info
-      const userProfileDoc = await getDoc(doc(db, 'userProfiles', currentUser.uid));
-      const userProfileData = userProfileDoc.exists() ? userProfileDoc.data() : null;
-      
+      if (billSnapshot.data().userId !== currentUser.uid) {
+        throw new Error('Unauthorized access to this document');
+      }
+
       // Prepare the request body
       const requestBody = {
-        billId: billData.id,
         fileUrl: billData.fileUrl,
-        userId: currentUser.uid
+        userId: currentUser.uid,
+        billId: billId
       };
       
-      console.log('Request body:', JSON.stringify(requestBody));
+      console.log('Request body:', requestBody);
       
-      // Try server-side processing first
-      try {
-        const hostname = window.location.hostname;
-        const origin = window.location.origin;
-        const pathname = window.location.pathname;
-        console.log('Current hostname:', hostname);
-        console.log('Current origin:', origin);
-        console.log('Current pathname:', pathname);
-        
-        // Use the analyze-full endpoint
-        const apiUrl = `${origin}/api/analyze-full`;
-        console.log('API URL:', apiUrl);
-        
-        // Make the API request
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(requestBody)
-        });
-        
-        console.log('Response status:', response.status);
-        console.log('Response status text:', response.statusText);
-        console.log('Response headers:', Object.fromEntries([...response.headers.entries()]));
-        
-        // Check if the response is ok
-        if (!response.ok) {
-          let errorText = '';
-          try {
-            errorText = await response.text();
-            console.log('Response text:', errorText);
-          } catch (textError) {
-            console.error('Error reading response text:', textError);
-            errorText = 'No response body';
+      // Get current hostname and origin
+      const hostname = window.location.hostname;
+      const origin = window.location.origin;
+      console.log('Current hostname:', hostname);
+      console.log('Current origin:', origin);
+      
+      // Construct API URL
+      const apiUrl = `${origin}/api/analyze-full`;
+      console.log('API URL:', apiUrl);
+      
+      // Make the API request with authorization header
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        // If unauthorized, try refreshing token and retry
+        if (response.status === 401 || response.status === 403) {
+          console.log('Authorization failed, attempting token refresh...');
+          const newToken = await currentUser.getIdToken(true);
+          console.log('New token obtained:', !!newToken);
+          
+          // Force auth state refresh
+          await auth.currentUser.reload();
+          console.log('Auth state refreshed');
+          
+          // Retry the request with new token
+          const retryResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${newToken}`
+            },
+            body: JSON.stringify(requestBody)
+          });
+          
+          if (!retryResponse.ok) {
+            throw new Error(`API request failed after token refresh: ${retryResponse.status}`);
           }
           
-          throw new Error(`API error: ${response.status} ${response.statusText} - ${errorText}`);
+          const data = await retryResponse.json();
+          console.log('API response data:', data);
+          
+          if (data.success) {
+            setExtractedData(data.extractedData);
+            setIsMedicalBill(data.isMedicalBill);
+            setAnalysisStatus('complete');
+            setProcessingMethod(data.processingMethod || 'server');
+            setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
+          } else {
+            throw new Error(data.error || 'Analysis failed');
+          }
+        } else {
+          throw new Error(`API request failed: ${response.status}`);
         }
-        
+      } else {
         const data = await response.json();
         console.log('API response data:', data);
         
-        if (!data.success) {
-          throw new Error(data.error || 'Failed to process document');
-        }
-        
-        // Set states based on the response
-        setIsMedicalBill(data.isMedicalBill);
-        setConfidence(data.confidence || 0);
-        setAnalysisStatus(data.isMedicalBill ? 'complete' : 'not-medical-bill');
-        
-        // Check if this used enhanced AI analysis
-        const usedEnhancedAnalysis = data.enhancedAnalysis === true;
-        
-        // Save the analysis version to Firestore
-        await setDoc(newAnalysisRef, {
-          analyzedAt: serverTimestamp(),
-          extractedData: {
-            ...data.extractedData,
-            insuranceInfo: {
-              ...data.extractedData?.insuranceInfo,
-              type: userProfileData?.insurance?.type || 'Not found'
-            }
-          },
-          extractedText: data.extractedText,
-          isMedicalBill: data.isMedicalBill,
-          confidence: data.confidence,
-          processingMethod: usedEnhancedAnalysis ? 'enhanced-ai' : 'server',
-          usedEnhancedAnalysis: usedEnhancedAnalysis,
-          userId: currentUser.uid,
-          version: versionNumber
-        });
-        
-        // Also update the main bill document
-        await updateDoc(doc(db, 'bills', billData.id), {
-          analyzedAt: serverTimestamp(),
-          analyzedAtString: new Date().toISOString(), // Add string version for compatibility
-          extractedData: {
-            ...data.extractedData,
-            insuranceInfo: {
-              ...data.extractedData?.insuranceInfo,
-              type: userProfileData?.insurance?.type || 'Not found'
-            }
-          },
-          isMedicalBill: data.isMedicalBill,
-          confidence: data.confidence,
-          status: 'analyzed',
-          processingMethod: usedEnhancedAnalysis ? 'enhanced-ai' : 'server',
-          usedEnhancedAnalysis: usedEnhancedAnalysis
-        });
-        
-        // Update the state with the new version
-        setAnalysisVersion({
-          id: versionId,
-          ...data,
-          version: versionNumber,
-          usedEnhancedAnalysis: usedEnhancedAnalysis
-        });
-        
-        console.log('Document updated in Firestore with server-processed data');
-        setProcessingMethod(usedEnhancedAnalysis ? 'enhanced-ai' : 'server');
-        setRawData({
-          extractedText: data.extractedText,
-          timestamp: new Date().toISOString()
-        });
-        
-        console.log('Extracted data updated:', data.extractedData);
-        setExtractedData({
-          ...data.extractedData,
-          extractedText: data.extractedText,
-          patientInfo: {
-            ...data.extractedData?.patientInfo,
-            fullName: data.extractedData?.patientInfo?.fullName || 
-                      data.extractedData?.patientInfo?.name ||
-                      (data.enhancedAnalysis && data.extractedData?.rawEnhancedData?.patientInfo?.name) || 
-                      '-'
-          }
-        });
-
-        // Also add a check to see if we need to clean the patient name
-        if (data.extractedData?.patientInfo?.fullName || data.extractedData?.patientInfo?.name) {
-          console.log('Cleaning patient name...');
-          const nameToClean = data.extractedData?.patientInfo?.fullName || data.extractedData?.patientInfo?.name;
-          const cleanedName = cleanPatientName(nameToClean);
-          console.log(`Original name: "${nameToClean}", Cleaned name: "${cleanedName}"`);
-          
-          // Update with the cleaned name
-          data.extractedData.patientInfo = {
-            ...data.extractedData.patientInfo,
-            fullName: cleanedName
-          };
-        }
-        
-        setOcrProgress(null);
-
-        // If we used enhanced AI, let's generate a better summary right away
-        if (usedEnhancedAnalysis && data.extractedText) {
-          console.log('Enhanced AI analysis complete - data saved successfully');
-          // Removing call to undefined function
-          // try {
-          //   await generateInitialSummary();
-          // } catch (summaryError) {
-          //   console.error('Error generating initial summary:', summaryError);
-          // }
-        }
-        
-        return;
-        
-      } catch (serverError) {
-        console.log('Server-side processing failed, trying client-side processing with OpenAI:', serverError);
-        
-        // Fall back to client-side processing with OpenAI
-        try {
-          console.log('Starting client-side document processing with OpenAI integration');
-          setProcessingMethod('client-openai');
-          
-          // Process the document client-side with progress handler
-          const result = await analyzeDocumentClient(billData.fileUrl, handleOcrProgress);
-          
-          // Reset OCR progress when done
-          setOcrProgress(null);
-          
-          if (result && result.extractedText) {
-            console.log('Client-side processing successful');
-            console.log('Raw data text updated, length:', result.extractedText.length);
-            console.log('First 200 chars of extracted text:', result.extractedText.substring(0, 200));
-            console.log('Processing method:', result.processingMethod || 'client');
-            
-            // Clean up the patient name
-            if (result.patientInfo && result.patientInfo.fullName) {
-              result.patientInfo.fullName = cleanPatientName(result.patientInfo.fullName);
-            }
-            
-            setRawData({
-              extractedText: result.extractedText,
-              source: result.processingMethod || 'client'
-            });
-            
-            setExtractedData(result);
-            
-            // Update the analysis document instead of the bill document
-            await setDoc(newAnalysisRef, {
-              status: 'analyzed',
-              analyzedAt: serverTimestamp(),
-              extractedData: {
-                ...result,
-                insuranceInfo: {
-                  ...result?.insuranceInfo,
-                  type: userProfileData?.insurance?.type || 'Not found'
-                }
-              },
-              extractedText: result.extractedText,
-              isMedicalBill: result.isMedicalBill,
-              confidence: result.confidence,
-              processingMethod: result.processingMethod || 'client',
-              userId: currentUser.uid,
-              version: versionNumber
-            });
-            
-            // Also update the main bill document
-            await updateDoc(doc(db, 'bills', billData.id), {
-              analyzedAt: serverTimestamp(),
-              analyzedAtString: new Date().toISOString(), // Add string version for compatibility
-              extractedData: {
-                ...result,
-                insuranceInfo: {
-                  ...result?.insuranceInfo,
-                  type: userProfileData?.insurance?.type || 'Not found'
-                }
-              },
-              isMedicalBill: result.isMedicalBill,
-              confidence: result.confidence,
-              status: 'analyzed'
-            });
-            
-            // Update the state with the new version
-            setAnalysisVersion({
-              id: versionId,
-              ...result,
-              version: versionNumber
-            });
-            
-            console.log('Document updated in Firestore with client-processed data');
-          } else {
-            throw new Error('No extracted text in client-side result');
-          }
-          
-        } catch (clientError) {
-          console.log('Client-side processing also failed, using fallback data:', clientError);
-          
-          // Use fallback dummy data
-          console.log('Setting fallback dummy text');
-          setProcessingMethod('fallback');
-          
-          const fallbackText = "This is fallback dummy text since both server-side and client-side processing failed to extract text from the document.";
-          setRawData({
-            extractedText: fallbackText,
-            source: 'fallback'
-          });
-          
-          console.log('Raw data text updated, length:', fallbackText.length);
-          console.log('First 200 chars of extracted text:', fallbackText);
-          
-          // Set dummy extracted data
-          const dummyData = {
-                patientInfo: {
-              name: "Sample Patient",
-              dob: "01/01/1980",
-              address: "123 Main St, Anytown, USA"
-                },
-                billInfo: {
-              provider: "Sample Medical Center",
-              date: "01/15/2023",
-              totalAmount: "$1,234.56"
-            },
-            services: [
-              {
-                description: "Office Visit",
-                date: "01/15/2023",
-                amount: "$150.00"
-              }
-            ],
-            insuranceInfo: {
-              provider: "Sample Insurance Co",
-              policyNumber: "ABC123456",
-              groupNumber: "XYZ789"
-            }
-          };
-          
-          setExtractedData(dummyData);
-          
-          // Update the analysis document instead of the bill document
-          await setDoc(newAnalysisRef, {
-            status: 'analyzed',
-            analyzedAt: serverTimestamp(),
-            extractedData: {
-              ...dummyData,
-              insuranceInfo: {
-                ...dummyData.insuranceInfo,
-                type: userProfileData?.insurance?.type || 'Not found'
-              }
-            },
-            extractedText: fallbackText,
-            isMedicalBill: false,
-            confidence: 0,
-            processingMethod: 'fallback',
-            userId: currentUser.uid,
-            version: versionNumber
-          });
-          
-          // Also update the main bill document
-          await updateDoc(doc(db, 'bills', billData.id), {
-            analyzedAt: serverTimestamp(),
-            analyzedAtString: new Date().toISOString(), // Add string version for compatibility
-            extractedData: {
-              ...dummyData,
-              insuranceInfo: {
-                ...dummyData.insuranceInfo,
-                type: userProfileData?.insurance?.type || 'Not found'
-              }
-            },
-            isMedicalBill: false,
-            confidence: 0,
-            status: 'analyzed'
-          });
-          
-          // Update the state with the new version
-          setAnalysisVersion({
-            id: versionId,
-            ...dummyData,
-            version: versionNumber
-          });
-          
-          console.log('Document updated in Firestore with fallback data');
+        if (data.success) {
+          setExtractedData(data.extractedData);
+          setIsMedicalBill(data.isMedicalBill);
+          setAnalysisStatus('complete');
+          setProcessingMethod(data.processingMethod || 'server');
+          setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
+        } else {
+          throw new Error(data.error || 'Analysis failed');
         }
       }
-      
     } catch (error) {
+      console.error('Error in data extraction:', error);
       console.error('Error in data extraction process:', error);
-      setError(`Error analyzing document: ${error.message}`);
-      
-      // Update the analysis document with error status
-      if (analysisVersion?.id) {
-        await updateDoc(doc(db, 'bills', billId, 'analyses', analysisVersion.id), {
-          status: 'error',
-          error: error.message,
-          updatedAt: serverTimestamp()
-        });
-      }
-    } finally {
-      setOcrProgress(null);
+      setError(error.message);
+      setAnalysisStatus('error');
     }
   };
 
@@ -1363,26 +1156,103 @@ export default function BillAnalysis() {
                                   
                                   {expandedReasoningId === index && (
                                     <div style={{
-                                      fontSize: "0.8rem",
-                                      color: "#94A3B8",
-                                      padding: "0.75rem",
+                                      fontSize: "0.875rem",
+                                      padding: "1rem",
                                       background: "rgba(15, 23, 42, 0.3)",
                                       borderRadius: "0.5rem",
-                                      border: "1px dashed rgba(59, 130, 246, 0.15)",
-                                      display: "flex",
-                                      flexDirection: "column",
-                                      gap: "0.75rem"
+                                      border: "1px solid rgba(59, 130, 246, 0.15)"
                                     }}>
-                                      {service.codeReasoning && (
-                                        <div>
-                                          <span style={{ fontWeight: "600", color: "#3B82F6" }}>Code Reasoning:</span> {service.codeReasoning}
+                                      {/* Step 1: Service Categorization */}
+                                      <div style={{ marginBottom: "1rem" }}>
+                                        <h4 style={{ 
+                                          color: "#3B82F6", 
+                                          fontWeight: "600", 
+                                          marginBottom: "0.5rem" 
+                                        }}>1. Service Categorization</h4>
+                                        <div style={{ 
+                                          background: "rgba(15, 23, 42, 0.5)", 
+                                          padding: "0.75rem",
+                                          borderRadius: "0.375rem",
+                                          border: "1px solid rgba(59, 130, 246, 0.1)"
+                                        }}>
+                                          <p>Service "{service.description}" was identified as <strong>{service.category}</strong></p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Reasoning: {service.categoryReasoning}
+                                          </p>
+                                          {service.confidence && (
+                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
+                                              Confidence: {service.confidence}%
+                                            </p>
+                                          )}
                                         </div>
-                                      )}
-                                      {service.categoryReasoning && (
-                                        <div>
-                                          <span style={{ fontWeight: "600", color: "#10B981" }}>Category Reasoning:</span> {service.categoryReasoning}
+                                      </div>
+
+                                      {/* Step 2: Code Matching */}
+                                      <div style={{ marginBottom: "1rem" }}>
+                                        <h4 style={{ 
+                                          color: "#3B82F6", 
+                                          fontWeight: "600", 
+                                          marginBottom: "0.5rem" 
+                                        }}>2. Code Matching</h4>
+                                        <div style={{ 
+                                          background: "rgba(15, 23, 42, 0.5)", 
+                                          padding: "0.75rem",
+                                          borderRadius: "0.375rem",
+                                          border: "1px solid rgba(59, 130, 246, 0.1)"
+                                        }}>
+                                          <p>Most similar to: <strong>{service.matchedEntry?.description || service.codeDescription}</strong></p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Match Method: {service.matchMethod || service.codeMatchMethod || 'Direct match'}
+                                          </p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Database Used: {service.database || (service.category === 'Lab and Diagnostic Tests' ? 'CLFS' : 
+                                              service.category === 'Drugs and Infusions' ? 'ASP' : 'CPT')}
+                                          </p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Assigned Code: {service.code}
+                                          </p>
+                                          {service.matchConfidence && (
+                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
+                                              Match Confidence: {service.matchConfidence}%
+                                            </p>
+                                          )}
                                         </div>
-                                      )}
+                                      </div>
+
+                                      {/* Step 3: Rate Determination */}
+                                      <div>
+                                        <h4 style={{ 
+                                          color: "#3B82F6", 
+                                          fontWeight: "600", 
+                                          marginBottom: "0.5rem" 
+                                        }}>3. Rate Determination</h4>
+                                        <div style={{ 
+                                          background: "rgba(15, 23, 42, 0.5)", 
+                                          padding: "0.75rem",
+                                          borderRadius: "0.375rem",
+                                          border: "1px solid rgba(59, 130, 246, 0.1)"
+                                        }}>
+                                          <p>Standard Rate: ${typeof service.standardRate === 'number' ? 
+                                            service.standardRate.toFixed(2) : 
+                                            service.standardRate?.replace(/[^0-9.]/g, '') || '0.00'}</p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Rate Type: {service.rateType || 'Medicare Fee Schedule'}
+                                          </p>
+                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
+                                            Billed Amount: ${typeof service.amount === 'number' ? 
+                                              service.amount.toFixed(2) : 
+                                              service.amount?.replace(/[^0-9.]/g, '') || '0.00'}
+                                          </p>
+                                          {(typeof service.potentialSavings === 'number' && service.potentialSavings > 0) && (
+                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
+                                              Potential Savings: ${service.potentialSavings.toFixed(2)} 
+                                              ({typeof service.amount === 'number' ? 
+                                                ((service.potentialSavings / service.amount) * 100).toFixed(1) : 
+                                                ((service.potentialSavings / parseFloat(service.amount?.replace(/[^0-9.]/g, '') || '0')) * 100).toFixed(1)}%)
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
                                   )}
                                 </div>
@@ -1400,16 +1270,17 @@ export default function BillAnalysis() {
                               padding: "1rem",
                               border: "1px solid rgba(59, 130, 246, 0.15)"
                             }}>
-                              {/* Billed amount */}
+                              {/* Billed amount - updated for consistent styling */}
                               <div style={{
                                 display: "flex",
                                 flexDirection: "column",
                                 gap: "0.5rem",
                                 flex: "1",
                                 padding: isMobile ? "0" : "0 1rem",
-                                borderRight: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)"
-                        }}>
-                          <span style={{ 
+                                paddingTop: isMobile ? "1rem" : "0",
+                                marginTop: isMobile ? "0.5rem" : "0"
+                              }}>
+                                <span style={{ 
                                   fontSize: "0.75rem",
                                   color: "#94A3B8",
                                   fontWeight: "500",
@@ -1417,25 +1288,31 @@ export default function BillAnalysis() {
                                   letterSpacing: "0.05em"
                                 }}>
                                   Billed
-                              </span>
-                          <span style={{ 
-                                  fontSize: isMobile ? "1.25rem" : "1.5rem",
-                                fontWeight: "700",
-                                  color: "#3B82F6",
-                              }}>
-                                  {service.amount}
-                              </span>
-                            </div>
-                            
-                              {/* Updated Medicare/Lab Rate section */}
+                                </span>
+                                <span>
+                                  <div style={{ 
+                                    fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                    fontWeight: "700",
+                                    color: "#3B82F6" 
+                                  }}>
+                                    ${typeof amountNumber === 'number' ? 
+                                      amountNumber.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : 
+                                      service.amount?.replace('$', '')}
+                                  </div>
+                                </span>
+                              </div>
+                              
+                              {/* LAB FEE SCHEDULE/ASP PRICE/MEDICARE RATE section - remove redundant parenthetical type indicators */}
                               <div style={{
                                 display: "flex",
                                 flexDirection: "column",
                                 gap: "0.5rem",
                                 flex: "1",
                                 padding: isMobile ? "0" : "0 1rem",
+                                borderLeft: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)",
                                 borderRight: isMobile ? "none" : "1px solid rgba(59, 130, 246, 0.15)",
                                 borderTop: isMobile ? "1px solid rgba(59, 130, 246, 0.15)" : "none",
+                                borderBottom: isMobile ? "1px solid rgba(59, 130, 246, 0.15)" : "none",
                                 paddingTop: isMobile ? "1rem" : "0",
                                 marginTop: isMobile ? "0.5rem" : "0"
                               }}>
@@ -1446,42 +1323,78 @@ export default function BillAnalysis() {
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em"
                                 }}>
-                                  {service.category === 'Lab and Diagnostic Tests' ? 'Lab Fee Schedule' : 'Medicare Rate'}
+                                  {service.category === 'Lab and Diagnostic Tests' ? 'Lab Fee Schedule' : 
+                                   service.category === 'Drugs and Infusions' ? 'ASP Price' : 
+                                   'Medicare Rate'}
                                 </span>
-                                <span style={{ 
-                                  fontSize: isMobile ? "1.25rem" : "1.5rem",
-                                  fontWeight: "700",
-                                  color: "#10B981",
-                                }}>
+                                <span>
                                   {service.category === 'Lab and Diagnostic Tests' ? (
+                                    <div style={{ 
+                                      fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                      fontWeight: "700",
+                                      color: "#10B981" 
+                                    }}>
+                                      ${typeof service.labRate === 'number' ? 
+                                        service.labRate.toFixed(2) :
+                                        service.labRate}
+                                    </div>
+                                  ) : service.category === 'Drugs and Infusions' ? (
                                     <div>
-                                      {service.labRate || service.reimbursementRate ? (
-                                        <div className="text-green-500 font-semibold">
-                                          ${(service.labRate || service.reimbursementRate).toFixed(2)}
-                                          <span className="text-xs text-gray-400 ml-1">(lab)</span>
+                                      {service.aspPrice || service.reimbursementRate ? (
+                                        <div style={{ 
+                                          fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                          fontWeight: "700",
+                                          color: "#10B981" 
+                                        }}>
+                                          ${typeof service.reimbursementRate === 'number' ? 
+                                            service.reimbursementRate.toFixed(2) :
+                                            service.reimbursementRate}
                                         </div>
                                       ) : (
-                                        <div className="text-gray-400">Not available <span className="text-xs">(lab)</span></div>
+                                        <div style={{ 
+                                          fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                          fontWeight: "700",
+                                          color: "#94A3B8" 
+                                        }}>
+                                          --
+                                        </div>
+                                      )}
+                                      {service.dosageAdjusted && (
+                                        <div style={{ 
+                                          fontSize: "0.75rem", 
+                                          color: "#94A3B8" 
+                                        }}>
+                                          Price adjusted for dosage
+                                        </div>
                                       )}
                                     </div>
                                   ) : (
                                     <div>
-                                      {service.reimbursementRate ? (
-                                        <div className="text-green-500 font-semibold">
-                                          ${service.reimbursementRate.toFixed(2)}
-                                          <span className="text-xs text-gray-400 ml-1">
-                                            ({service.reimbursementType})
-                                          </span>
+                                      {service.reimbursementRate && service.reimbursementRate !== 'Coming Soon' ? (
+                                        <div style={{ 
+                                          fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                          fontWeight: "700",
+                                          color: "#10B981" 
+                                        }}>
+                                          ${typeof service.reimbursementRate === 'number' ? 
+                                            service.reimbursementRate.toFixed(2) :
+                                            service.reimbursementRate}
                                         </div>
                                       ) : (
-                                        <div className="text-gray-400">Not available</div>
+                                        <div style={{ 
+                                          fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                          fontWeight: "700",
+                                          color: "#94A3B8" 
+                                        }}>
+                                          --
+                                        </div>
                                       )}
                                     </div>
                                   )}
                                 </span>
                               </div>
                               
-                              {/* Overcharge indicator */}
+                              {/* Potential Savings section - green color scheme, showing only percentage */}
                               <div style={{
                                 display: "flex",
                                 flexDirection: "column",
@@ -1499,31 +1412,35 @@ export default function BillAnalysis() {
                                   textTransform: "uppercase",
                                   letterSpacing: "0.05em"
                                 }}>
-                                  Assessment
+                                  Potential Savings
                                 </span>
-                                <div style={{
-                                display: "flex",
-                                alignItems: "center",
-                                  gap: "0.5rem",
-                                  background: "rgba(239, 68, 68, 0.1)",
-                                  padding: "0.4rem 0.75rem",
-                                  borderRadius: "0.5rem",
-                                  border: "1px solid rgba(239, 68, 68, 0.2)",
-                                  width: "fit-content"
-                                }}>
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <circle cx="12" cy="12" r="10"></circle>
-                                      <line x1="12" y1="8" x2="12" y2="12"></line>
-                                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                    </svg>
-                                     <span style={{ 
-                                    fontSize: "0.85rem",
-                                    fontWeight: "600",
-                                    color: "#EF4444"
-                                     }}>
-                                    Likely Overcharged
-                                 </span>
-                                </div>
+                                <span>
+                                  {service.potentialSavings?.amount > 0 ? (
+                                    <div style={{ 
+                                      fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                      fontWeight: "700",
+                                      color: "#10B981" 
+                                    }}>
+                                      {service.potentialSavings.percentage.toFixed(0)}%
+                                    </div>
+                                  ) : ((service.reimbursementRate || service.labRate) ? (
+                                    <div style={{ 
+                                      fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                      fontWeight: "700",
+                                      color: "#10B981" 
+                                    }}>
+                                      0%
+                                    </div>
+                                  ) : (
+                                    <div style={{ 
+                                      fontSize: isMobile ? "1.75rem" : "1.875rem", 
+                                      fontWeight: "700",
+                                      color: "#94A3B8" 
+                                    }}>
+                                      --
+                                    </div>
+                                  ))}
+                                </span>
                               </div>
                             </div>
                           </div>

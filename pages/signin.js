@@ -58,12 +58,21 @@ export default function SignIn() {
     setError('');
 
     try {
+      // Sign out first to ensure clean state
+      await auth.signOut();
+      console.log('Signed out existing user');
+
       const userCredential = await signInWithEmailAndPassword(
         auth,
         formData.email,
         formData.password
       );
-      console.log('Sign in successful:', userCredential.user);
+      console.log('Sign in successful:', userCredential.user.uid);
+      
+      // Get a fresh token
+      const token = await userCredential.user.getIdToken(true);
+      console.log('Got fresh token:', !!token);
+      
       router.push('/dashboard');
     } catch (error) {
       console.error('Sign in error:', error);
@@ -83,16 +92,24 @@ export default function SignIn() {
     setError('');
     
     try {
+      // Sign out first to ensure clean state
+      await auth.signOut();
+      console.log('Signed out existing user');
+
       // Configure Google provider with additional settings
       provider.setCustomParameters({
-        prompt: 'select_account',
-        login_hint: 'user@example.com'
+        prompt: 'select_account'
       });
       
       // Add more detailed error logging
       try {
         const result = await signInWithPopup(auth, provider);
-        console.log('Google sign in successful:', result.user);
+        console.log('Google sign in successful:', result.user.uid);
+        
+        // Get a fresh token
+        const token = await result.user.getIdToken(true);
+        console.log('Got fresh token:', !!token);
+        
         router.push('/dashboard');
       } catch (popupError) {
         console.error('Popup error details:', {

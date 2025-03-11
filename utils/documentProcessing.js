@@ -444,17 +444,17 @@ async function categorizeServiceWithOpenAI(service) {
   let lastError = null;
 
   while (retryCount < MAX_RETRIES) {
-    try {
+  try {
       console.log(`[SERVICE_CATEGORIZATION_AI] Starting OpenAI categorization for: "${service.description}" (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-      
-      // Extract relevant information
-      const description = service.description || '';
-      const codeDescription = service.codeDescription || '';
-      const code = service.code || '';
-      
-      // Create a prompt for OpenAI
-      const prompt = `I need to categorize this medical service into one of six predefined categories:
-      
+    
+    // Extract relevant information
+    const description = service.description || '';
+    const codeDescription = service.codeDescription || '';
+    const code = service.code || '';
+    
+    // Create a prompt for OpenAI
+    const prompt = `I need to categorize this medical service into one of six predefined categories:
+    
 Service Description: "${description}"
 ${code ? `CPT/HCPCS Code: ${code}` : ''}
 ${codeDescription ? `Code Description: "${codeDescription}"` : ''}
@@ -474,29 +474,29 @@ Please categorize this service into one of these six categories. Respond in JSON
   "reasoning": "Brief explanation of why this category is appropriate"
 }`;
 
-      console.log('[SERVICE_CATEGORIZATION_AI] Calling OpenAI API for service categorization');
+    console.log('[SERVICE_CATEGORIZATION_AI] Calling OpenAI API for service categorization');
       
       // Call OpenAI API with timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
-      // Call OpenAI API
-      const response = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'You are a medical billing expert specializing in categorizing medical services. Your task is to categorize services into one of six predefined categories. Be precise and consider both the service description and CPT/HCPCS code if provided.' 
-          },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.2,
-        response_format: { type: "json_object" }
+    
+    // Call OpenAI API
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are a medical billing expert specializing in categorizing medical services. Your task is to categorize services into one of six predefined categories. Be precise and consider both the service description and CPT/HCPCS code if provided.' 
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" }
       }, { signal: controller.signal });
       
       clearTimeout(timeoutId);
-      
-      // Parse the response
+    
+    // Parse the response
       const contentStr = response.choices[0]?.message?.content;
       if (!contentStr) {
         throw new Error('Empty response from OpenAI');
@@ -511,20 +511,20 @@ Please categorize this service into one of these six categories. Respond in JSON
         throw new Error(`Failed to parse OpenAI response: ${parseError.message}`);
       }
       
-      console.log('[SERVICE_CATEGORIZATION_AI] OpenAI response:', JSON.stringify(result, null, 2));
-      
-      // Validate the category
-      const validCategories = [
-        'Office visits and Consultations',
-        'Procedures and Surgeries',
-        'Lab and Diagnostic Tests',
-        'Drugs and Infusions',
-        'Medical Equipment',
-        'Hospital stays and emergency care visits'
-      ];
-      
-      if (!validCategories.includes(result.category)) {
-        console.warn('[SERVICE_CATEGORIZATION_AI] OpenAI returned invalid category:', result.category);
+    console.log('[SERVICE_CATEGORIZATION_AI] OpenAI response:', JSON.stringify(result, null, 2));
+    
+    // Validate the category
+    const validCategories = [
+      'Office visits and Consultations',
+      'Procedures and Surgeries',
+      'Lab and Diagnostic Tests',
+      'Drugs and Infusions',
+      'Medical Equipment',
+      'Hospital stays and emergency care visits'
+    ];
+    
+    if (!validCategories.includes(result.category)) {
+      console.warn('[SERVICE_CATEGORIZATION_AI] OpenAI returned invalid category:', result.category);
         // Instead of returning immediately, let's map to the closest category
         const defaultCategory = 'Other';
         // Try to find the closest category
@@ -538,14 +538,14 @@ Please categorize this service into one of these six categories. Respond in JSON
           }
         }
         return { category: defaultCategory, reasoning: null };
-      }
-      
-      console.log(`[SERVICE_CATEGORIZATION_AI] Categorized as "${result.category}" with confidence ${result.confidence}`);
-      return { 
-        category: result.category, 
-        reasoning: result.reasoning 
-      };
-    } catch (error) {
+    }
+    
+    console.log(`[SERVICE_CATEGORIZATION_AI] Categorized as "${result.category}" with confidence ${result.confidence}`);
+    return { 
+      category: result.category, 
+      reasoning: result.reasoning 
+    };
+  } catch (error) {
       lastError = error;
       console.error(`[SERVICE_CATEGORIZATION_AI] Error categorizing service with OpenAI (Attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
       
