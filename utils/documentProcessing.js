@@ -313,7 +313,8 @@ export async function processWithLLM(text, isVerificationMode = false) {
         }
       ],
       temperature: 0.1,
-      max_tokens: 2000
+      max_tokens: 2000,
+      response_format: { type: "json_object" }
     });
 
     if (!completion.choices?.[0]?.message?.content) {
@@ -324,7 +325,11 @@ export async function processWithLLM(text, isVerificationMode = false) {
     console.log('Raw OpenAI response:', responseContent);
 
     try {
-      const parsedResponse = JSON.parse(responseContent);
+      // Clean the response content before parsing
+      const cleanedContent = cleanJsonResponse(responseContent);
+      console.log('Cleaned response content:', cleanedContent);
+      
+      const parsedResponse = JSON.parse(cleanedContent);
       
       if (isVerificationMode) {
         if (typeof parsedResponse.isMedicalBill !== 'boolean') {
@@ -360,6 +365,33 @@ export async function processWithLLM(text, isVerificationMode = false) {
     error.details = error.message;
     throw error;
   }
+}
+
+/**
+ * Clean JSON response from OpenAI to handle formatting issues
+ * @param {string} content - The raw response content
+ * @returns {string} - Cleaned JSON string
+ */
+function cleanJsonResponse(content) {
+  if (!content) return '{}';
+  
+  // Remove markdown code block indicators
+  let cleaned = content.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+  
+  // Remove any leading/trailing whitespace
+  cleaned = cleaned.trim();
+  
+  // If the content doesn't start with {, add it
+  if (!cleaned.startsWith('{')) {
+    cleaned = '{' + cleaned;
+  }
+  
+  // If the content doesn't end with }, add it
+  if (!cleaned.endsWith('}')) {
+    cleaned = cleaned + '}';
+  }
+  
+  return cleaned;
 }
 
 /**

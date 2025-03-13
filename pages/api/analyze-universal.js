@@ -304,18 +304,17 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
     }
     
-    // Get parameters from either query (GET) or body (POST)
+    // Get and validate the request parameters from either body (POST) or query (GET)
     let fileUrl, userId, billId;
     
-    // Unified parameter extraction that works with both GET and POST
     if (req.method === 'POST' && req.body) {
-      // Get from request body
+      // Extract from POST body
       fileUrl = req.body.fileUrl;
       userId = req.body.userId;
       billId = req.body.billId;
       console.log('Extracted parameters from POST body');
     } else {
-      // Get from query parameters (works for both GET and POST if body parsing fails)
+      // Extract from query parameters (GET)
       fileUrl = req.query.fileUrl;
       userId = req.query.userId;
       billId = req.query.billId;
@@ -380,24 +379,24 @@ export default async function handler(req, res) {
       console.log('Analysis complete, returning results');
       return res.status(200).json(result);
     } catch (analysisError) {
-      console.error('Error in document analysis:', analysisError);
+      console.error('Error analyzing document:', analysisError);
       
-      // Handle Sharp module error specifically
+      // Handle specific errors related to Sharp module
       if (analysisError.message && analysisError.message.includes('sharp')) {
-        console.log('Detected Sharp module error, providing helpful error message');
+        console.log('Sharp module error detected, returning friendly error message');
         return res.status(500).json({
-          error: 'Image processing library error in serverless environment',
-          message: 'The server encountered an issue with the image processing library. This is a known issue with the Sharp module in serverless environments.',
-          suggestion: 'Please try again or contact support if the issue persists.',
-          originalError: analysisError.message
+          error: 'Image processing error',
+          message: 'There was an issue processing your image. Please try the fallback endpoint.',
+          details: analysisError.message,
+          recommendation: 'Use the /api/analyze-fallback endpoint instead'
         });
       }
       
-      // Return a detailed error for other cases
-      return res.status(500).json({
-        error: 'Error analyzing document',
-        message: analysisError.message,
-        stack: process.env.NODE_ENV === 'development' ? analysisError.stack : undefined
+      // Return a detailed error response
+      return res.status(500).json({ 
+        error: analysisError.message || 'Error analyzing document',
+        stack: process.env.NODE_ENV === 'development' ? analysisError.stack : undefined,
+        details: analysisError.details || undefined
       });
     }
   } catch (error) {

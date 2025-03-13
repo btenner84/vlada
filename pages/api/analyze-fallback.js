@@ -106,6 +106,31 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Check for required environment variables
+    const requiredEnvVars = {
+      'FIREBASE_PROJECT_ID': process.env.FIREBASE_PROJECT_ID,
+      'FIREBASE_CLIENT_EMAIL': process.env.FIREBASE_CLIENT_EMAIL,
+      'FIREBASE_PRIVATE_KEY': process.env.FIREBASE_PRIVATE_KEY,
+      'FIREBASE_STORAGE_BUCKET': process.env.FIREBASE_STORAGE_BUCKET
+    };
+
+    const missingEnvVars = Object.entries(requiredEnvVars)
+      .filter(([_, value]) => !value)
+      .map(([key]) => key);
+
+    if (missingEnvVars.length > 0) {
+      console.error('Missing required environment variables:', missingEnvVars);
+      return res.status(500).json({ 
+        error: `Server configuration error: Missing required environment variables: ${missingEnvVars.join(', ')}` 
+      });
+    }
+    
+    // Check if Firebase Admin SDK is initialized
+    if (!adminDb || !adminStorage) {
+      console.error('Firebase Admin SDK not initialized');
+      return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
+    }
+    
     // Get parameters from either query (GET) or body (POST)
     let fileUrl, userId, billId;
     
@@ -124,7 +149,21 @@ export default async function handler(req, res) {
     
     if (!fileUrl) {
       console.log('Missing required parameter: fileUrl');
-      return res.status(400).json({ error: 'Missing required parameter: fileUrl' });
+      return res.status(400).json({ 
+        error: 'Missing required parameter: fileUrl',
+        receivedParams: {
+          fromBody: req.body ? { 
+            hasFileUrl: !!req.body.fileUrl,
+            hasUserId: !!req.body.userId,
+            hasBillId: !!req.body.billId
+          } : 'No body',
+          fromQuery: { 
+            hasFileUrl: !!req.query.fileUrl,
+            hasUserId: !!req.query.userId,
+            hasBillId: !!req.query.billId
+          }
+        }
+      });
     }
 
     // Log the request parameters (but mask sensitive parts of the URL)
@@ -174,8 +213,8 @@ export default async function handler(req, res) {
         
         return res.status(200).json({
           success: true,
-          message: 'Document queued for processing',
           status: 'processing',
+          message: 'Your document is being processed. This may take a few minutes.',
           billId: billId,
           timestamp: now.toISOString()
         });
@@ -187,6 +226,7 @@ export default async function handler(req, res) {
       // For client-side requests without a billId, return a generic success response
       return res.status(200).json({
         success: true,
+        status: 'processing',
         message: 'Request received, but no document processing will occur without a valid billId',
         timestamp: new Date().toISOString()
       });

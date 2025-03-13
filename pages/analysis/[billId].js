@@ -390,8 +390,8 @@ export default function BillAnalysis() {
       let errorDetails = {};
       let usedFallback = false;
       
-      // First try POST request to main endpoint
       try {
+        // First try POST request to main endpoint
         console.log('Attempting POST request to main endpoint');
         response = await fetch(mainApiUrl, {
           method: 'POST',
@@ -500,8 +500,10 @@ export default function BillAnalysis() {
         }
         
         // Process the response data
-        if (responseData && (responseData.success || responseData.status === 'processing')) {
+        if (responseData) {
+          // Check if we're using the fallback endpoint (async processing)
           if (usedFallback) {
+            console.log('Using fallback endpoint with async processing');
             // If we used the fallback endpoint, the document is being processed asynchronously
             setAnalysisStatus('queued');
             setProcessingMethod('async');
@@ -513,15 +515,39 @@ export default function BillAnalysis() {
               timestamp: responseData.timestamp
             });
             
+            // Generate a summary for the user
+            try {
+              console.log('Generating initial summary for extracted data...');
+              const summary = `Summary:
+- Status: Processing
+- Message: ${responseData.message || 'Document is being processed'}
+- Timestamp: ${new Date(responseData.timestamp).toLocaleString()}`;
+              
+              console.log('Summary generated successfully:', summary);
+              
+              // Update the extracted data with the summary
+              setExtractedData(prev => ({
+                ...prev,
+                summary
+              }));
+            } catch (summaryError) {
+              console.error('Error generating summary:', summaryError);
+              // Continue without summary
+            }
+            
             // Set a timer to check the status periodically
             const checkStatusInterval = setInterval(async () => {
               try {
+                console.log('Checking bill status...');
                 const billDoc = await getDoc(billRef);
                 if (billDoc.exists() && billDoc.data().status === 'analyzed') {
+                  console.log('Bill analysis complete, reloading page');
                   clearInterval(checkStatusInterval);
                   
                   // Reload the page to get the latest data
                   window.location.reload();
+                } else {
+                  console.log('Bill still processing, current status:', billDoc.data()?.status || 'unknown');
                 }
               } catch (error) {
                 console.error('Error checking bill status:', error);
@@ -531,14 +557,16 @@ export default function BillAnalysis() {
             // Clear the interval after 5 minutes (30 checks)
             setTimeout(() => {
               clearInterval(checkStatusInterval);
+              console.log('Processing timeout reached');
               setAnalysisStatus('error');
               setAnalysisError({
                 message: 'Processing timeout. Please try again later.',
                 details: { timeout: true }
               });
             }, 5 * 60 * 1000);
-          } else {
+          } else if (responseData.extractedData || responseData.isMedicalBill !== undefined) {
             // Normal processing with the main endpoint
+            console.log('Processing complete response from main endpoint');
             setExtractedData(responseData.extractedData);
             setIsMedicalBill(responseData.isMedicalBill);
             setAnalysisStatus('complete');
@@ -562,22 +590,32 @@ export default function BillAnalysis() {
                 // Continue anyway - this is not critical
               }
             }
+          } else if (responseData.error) {
+            // Handle error response
+            throw new Error(responseData.error);
+          } else {
+            // Handle unexpected response format
+            console.error('Unexpected response format:', responseData);
+            throw new Error('Unexpected response format from server');
           }
         } else {
-          throw new Error(responseData?.error || 'Analysis failed');
+          throw new Error('No response data received');
         }
       } catch (error) {
-        console.error('Error in data extraction:', error);
+        console.error('Error in API request:', error);
         setAnalysisStatus('error');
         setAnalysisError({
           message: error.message,
           details: errorDetails
         });
-        throw error;
       }
     } catch (error) {
       console.error('Error in data extraction process:', error);
       setAnalysisStatus('error');
+      setAnalysisError({
+        message: error.message,
+        details: { general: true }
+      });
       return false;
     }
     
