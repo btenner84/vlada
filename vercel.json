@@ -24,5 +24,35 @@
   "redirects": [],
   "cleanUrls": true,
   "trailingSlash": false,
-  "crons": []
+  "crons": [],
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next",
+      "config": {
+        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/analyze-universal",
+      "methods": ["GET", "POST", "OPTIONS"],
+      "dest": "/api/analyze-universal"
+    },
+    {
+      "src": "/api/analyze-fallback",
+      "methods": ["GET", "POST", "OPTIONS"],
+      "dest": "/api/analyze-fallback"
+    },
+    {
+      "src": "/api/process-bill",
+      "methods": ["GET", "POST", "OPTIONS"],
+      "dest": "/api/process-bill"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
 } 
