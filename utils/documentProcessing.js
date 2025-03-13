@@ -8,6 +8,9 @@ import { matchServiceToCPT } from './cptMatcher.js';
 import { matchServiceToLab } from './labMatcher.js';
 import { matchServiceToDrug } from './drugMatcher.js';
 import { matchServiceToMedicare } from './medicareMatcher.js';
+import { matchServiceToOPPS } from './oppsMatcher.js';
+import { decideServiceComponent } from './componentDecider.js';
+import { getDatabaseMatcher } from './databaseMatcherFactory.js';
 import { 
   extractBillingCodes, 
   enhanceServiceStructure,
@@ -821,26 +824,82 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         case 'Outpatient Procedures & Surgeries':
         case 'Procedures and Surgeries':
           if (enhancedService.setting !== 'inpatient') {
-            console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Outpatient Procedure');
-            const outpatientMatch = await matchServiceToMedicare(service, {
-              category: 'Procedures and Surgeries', // Use old category for backward compatibility
+            console.log('[SERVICE_ENHANCEMENT] Processing outpatient procedure');
+            
+            // Create bill context for component decision
+            const procedureBillContext = {
+              ...billInfo,
+              otherServices: services.filter(s => s !== service).map(s => ({
+                description: s.description,
+                code: s.code,
+                category: s.category || s.enhancedCategory
+              }))
+            };
+            
+            // Decide whether to use professional or facility component
+            const componentDecision = await decideServiceComponent(service, procedureBillContext);
+            console.log(`[SERVICE_ENHANCEMENT] Component decision: ${componentDecision.componentType} (${componentDecision.confidence.toFixed(2)})`);
+            
+            // Store the component decision in the enhanced service
+            enhancedService.componentType = componentDecision.componentType;
+            enhancedService.componentConfidence = componentDecision.confidence;
+            enhancedService.componentReasoning = componentDecision.reasoning;
+            
+            // Get the appropriate matcher based on the component decision
+            const matcher = getDatabaseMatcher(componentDecision.database);
+            
+            // Match the service using the selected database
+            const match = await matcher(service, {
+              category: 'Procedures and Surgeries',
               patientAge: patientInfo?.age,
               serviceDate: service.date,
-              facilityType: 'facility' // Force facility type for outpatient procedures
+              facilityType: billInfo?.facilityType,
+              componentType: componentDecision.componentType
             });
             
-            if (outpatientMatch) {
-              enhancedService.code = outpatientMatch.code;
-              enhancedService.codeDescription = outpatientMatch.description;
-              enhancedService.codeConfidence = outpatientMatch.confidence;
-              enhancedService.codeReasoning = outpatientMatch.reasoning;
-              enhancedService.codeMatchMethod = outpatientMatch.matchMethod;
-              enhancedService.pricingModel = 'OPPS';
+            if (match) {
+              enhancedService.code = match.code;
+              enhancedService.codeDescription = match.description;
+              enhancedService.codeConfidence = match.confidence;
+              enhancedService.codeReasoning = match.reasoning;
+              enhancedService.codeMatchMethod = match.matchMethod;
+              enhancedService.pricingModel = componentDecision.database;
               
-              // Set reimbursement rates
-              enhancedService.facilityType = 'facility';
-              enhancedService.reimbursementRate = outpatientMatch.facilityRate;
-              enhancedService.reimbursementType = 'facility';
+              // Set reimbursement rates based on component type
+              if (componentDecision.componentType === 'facility') {
+                enhancedService.facilityType = 'facility';
+                
+                // For OPPS, use the payment rate
+                if (componentDecision.database === 'OPPS' && match.paymentRate) {
+                  enhancedService.reimbursementRate = match.paymentRate;
+                  enhancedService.reimbursementType = 'facility';
+                  enhancedService.apcCode = match.apcCode;
+                  enhancedService.apcDescription = match.apcDescription;
+                  enhancedService.minCopay = match.minCopay;
+                  enhancedService.status = match.status;
+                } 
+                // For PFS, use the facility rate
+                else if (match.facilityRate !== null) {
+                  enhancedService.reimbursementRate = match.facilityRate;
+                  enhancedService.reimbursementType = 'facility';
+                }
+              } else if (componentDecision.componentType === 'professional') {
+                // For professional component, use the appropriate rate based on setting
+                if (billInfo?.facilityType === 'facility' && match.facilityRate !== null) {
+                  enhancedService.facilityType = 'facility';
+                  enhancedService.reimbursementRate = match.facilityRate;
+                  enhancedService.reimbursementType = 'facility';
+                } else if (match.nonFacilityRate !== null) {
+                  enhancedService.facilityType = 'non-facility';
+                  enhancedService.reimbursementRate = match.nonFacilityRate;
+                  enhancedService.reimbursementType = 'non-facility';
+                }
+              } else if (componentDecision.componentType === 'global') {
+                // For global services, use the non-facility rate
+                enhancedService.facilityType = 'non-facility';
+                enhancedService.reimbursementRate = match.nonFacilityRate;
+                enhancedService.reimbursementType = 'global';
+              }
             }
           }
           break;
