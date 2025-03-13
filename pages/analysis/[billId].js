@@ -359,6 +359,29 @@ export default function BillAnalysis() {
       console.log('Current hostname:', hostname);
       console.log('Current origin:', origin);
       
+      // First, test the diagnostic endpoint
+      try {
+        console.log('Testing diagnostic endpoint...');
+        const testApiUrl = `${origin}/api/analyze-test`;
+        const testResponse = await fetch(testApiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ test: true })
+        });
+        
+        if (testResponse.ok) {
+          const testData = await testResponse.json();
+          console.log('Diagnostic endpoint response:', testData);
+        } else {
+          console.error('Diagnostic endpoint failed:', testResponse.status);
+        }
+      } catch (testError) {
+        console.error('Error testing diagnostic endpoint:', testError);
+      }
+      
       // Construct API URL
       const apiUrl = `${origin}/api/analyze-full`;
       console.log('API URL:', apiUrl);
@@ -372,6 +395,19 @@ export default function BillAnalysis() {
         },
         body: JSON.stringify(requestBody)
       });
+
+      // Log response status and headers
+      console.log('API response status:', response.status);
+      console.log('API response status text:', response.statusText);
+      
+      // Try to get response text for debugging
+      let responseText = '';
+      try {
+        responseText = await response.text();
+        console.log('API response text:', responseText);
+      } catch (textError) {
+        console.error('Error getting response text:', textError);
+      }
 
       if (!response.ok) {
         // If unauthorized, try refreshing token and retry
@@ -398,7 +434,15 @@ export default function BillAnalysis() {
             throw new Error(`API request failed after token refresh: ${retryResponse.status}`);
           }
           
-          const data = await retryResponse.json();
+          // Try to parse the response as JSON
+          let data;
+          try {
+            data = await retryResponse.json();
+          } catch (jsonError) {
+            console.error('Error parsing JSON response:', jsonError);
+            throw new Error(`Failed to parse API response: ${jsonError.message}`);
+          }
+          
           console.log('API response data:', data);
           
           if (data.success) {
@@ -410,22 +454,53 @@ export default function BillAnalysis() {
           } else {
             throw new Error(data.error || 'Analysis failed');
           }
+        } else if (response.status === 405) {
+          // Method Not Allowed - try a GET request to the diagnostic endpoint
+          console.log('Method Not Allowed, trying diagnostic endpoint...');
+          const diagnosticUrl = `${origin}/api/analyze-test`;
+          const diagnosticResponse = await fetch(diagnosticUrl);
+          
+          if (diagnosticResponse.ok) {
+            const diagnosticData = await diagnosticResponse.json();
+            console.log('Diagnostic endpoint response:', diagnosticData);
+            throw new Error(`API request failed with 405 Method Not Allowed. Diagnostic info: ${JSON.stringify(diagnosticData)}`);
+          } else {
+            throw new Error(`API request failed: ${response.status}. Response text: ${responseText}`);
+          }
         } else {
-          throw new Error(`API request failed: ${response.status}`);
+          throw new Error(`API request failed: ${response.status}. Response text: ${responseText}`);
         }
-      } else {
-        const data = await response.json();
-        console.log('API response data:', data);
+      }
+
+      // Try to parse the response as JSON
+      let data;
+      try {
+        // Reset the response to parse it as JSON
+        const jsonResponse = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(requestBody)
+        });
         
-        if (data.success) {
-          setExtractedData(data.extractedData);
-          setIsMedicalBill(data.isMedicalBill);
-          setAnalysisStatus('complete');
-          setProcessingMethod(data.processingMethod || 'server');
-          setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
-        } else {
-          throw new Error(data.error || 'Analysis failed');
-        }
+        data = await jsonResponse.json();
+      } catch (jsonError) {
+        console.error('Error parsing JSON response:', jsonError);
+        throw new Error(`Failed to parse API response: ${jsonError.message}`);
+      }
+      
+      console.log('API response data:', data);
+      
+      if (data.success) {
+        setExtractedData(data.extractedData);
+        setIsMedicalBill(data.isMedicalBill);
+        setAnalysisStatus('complete');
+        setProcessingMethod(data.processingMethod || 'server');
+        setRawData(prev => ({ ...prev, extractedText: data.extractedText }));
+      } else {
+        throw new Error(data.error || 'Analysis failed');
       }
     } catch (error) {
       console.error('Error in data extraction:', error);

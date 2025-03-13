@@ -261,10 +261,21 @@ export default async function handler(req, res) {
     return;
   }
   
-  // Only allow POST requests
+  // Handle GET requests for diagnostics
+  if (req.method === 'GET') {
+    console.log('Handling GET request for diagnostics');
+    return res.status(200).json({ 
+      status: 'API is online',
+      message: 'This endpoint requires a POST request with proper payload',
+      documentation: 'Send a POST request with fileUrl, userId, and billId parameters',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  // Only allow POST requests for actual processing
   if (req.method !== 'POST') {
-    console.log(`Rejecting ${req.method} request - only POST is allowed`);
-    res.setHeader('Allow', ['POST', 'OPTIONS']);
+    console.log(`Rejecting ${req.method} request - only POST and GET are allowed`);
+    res.setHeader('Allow', ['POST', 'GET', 'OPTIONS']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
     return;
   }
