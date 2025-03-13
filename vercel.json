@@ -10,16 +10,6 @@
       ]
     }
   ],
-  "functions": {
-    "pages/api/analyze-full.js": {
-      "maxDuration": 300,
-      "memory": 3008
-    },
-    "pages/api/**/*.js": {
-      "maxDuration": 300,
-      "memory": 3008
-    }
-  },
   "rewrites": [],
   "redirects": [],
   "cleanUrls": true,
@@ -30,7 +20,9 @@
       "src": "package.json",
       "use": "@vercel/next",
       "config": {
-        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install"
+        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install",
+        "maxDuration": 300,
+        "memory": 3008
       }
     }
   ],
