@@ -10,7 +10,11 @@
       ]
     }
   ],
-  "rewrites": [],
+  "rewrites": [
+    { "source": "/api/analyze-universal", "destination": "/api/analyze-universal" },
+    { "source": "/api/analyze-fallback", "destination": "/api/analyze-fallback" },
+    { "source": "/api/process-bill", "destination": "/api/process-bill" }
+  ],
   "redirects": [],
   "cleanUrls": true,
   "trailingSlash": false,
@@ -24,27 +28,6 @@
         "maxDuration": 300,
         "memory": 3008
       }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/analyze-universal",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "dest": "/api/analyze-universal"
-    },
-    {
-      "src": "/api/analyze-fallback",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "dest": "/api/analyze-fallback"
-    },
-    {
-      "src": "/api/process-bill",
-      "methods": ["GET", "POST", "OPTIONS"],
-      "dest": "/api/process-bill"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
     }
   ]
 } 
