@@ -1,7 +1,7 @@
-const xlsx = require('xlsx');
-const path = require('path');
-const { OpenAI } = require('openai');
-const admin = require('../firebase/admin');
+import xlsx from 'xlsx';
+import path from 'path';
+import { OpenAI } from 'openai';
+import { adminDb } from '../firebase/admin.js';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -64,8 +64,8 @@ async function lookupDrugCode(code) {
     
     // Try to find in Firestore if available
     try {
-      if (admin && admin.firestore) {
-        const docRef = await admin.firestore().collection('drugCodes').doc(code).get();
+      if (adminDb && adminDb.firestore) {
+        const docRef = await adminDb.firestore().collection('drugCodes').doc(code).get();
         
         if (docRef.exists) {
           const data = docRef.data();
@@ -430,6 +430,6 @@ const matchServiceToDrug = async (service) => {
   }
 };
 
-module.exports = {
+export {
   matchServiceToDrug
 }; 

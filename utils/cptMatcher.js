@@ -1,4 +1,4 @@
-import { adminDb } from '../firebase/admin';
+import { adminDb } from '../firebase/admin.js';
 import { OpenAI } from 'openai';
 
 // Initialize OpenAI client
@@ -16,7 +16,7 @@ const db = adminDb;
  * @param {string} extractedCode - CPT code directly extracted from the bill (if available)
  * @returns {Promise<object|null>} - The matched CPT code information or null
  */
-export async function matchServiceToCPT(serviceDescription, additionalContext = {}, extractedCode = null) {
+async function matchServiceToCPT(serviceDescription, additionalContext = {}, extractedCode = null) {
   try {
     console.log(`[CPT_MATCHER] Starting CPT code matching for: "${serviceDescription}"`);
     console.log(`[CPT_MATCHER] Additional context:`, JSON.stringify(additionalContext));
@@ -746,4 +746,10 @@ function calculateMatchScore(serviceDesc, cptDesc, serviceKeywords) {
   
   // 5. Calculate final score (weighted average)
   return (keywordScore * 0.4) + (overlapScore * 0.3) + (phraseScore * 0.3);
-} 
+}
+
+// Export the main function using ES module exports
+export {
+  matchServiceToCPT,
+  lookupCPTCode
+}; 

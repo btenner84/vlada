@@ -1,5 +1,5 @@
 // Google Cloud Vision client initialization
-const vision = require('@google-cloud/vision');
+import vision from '@google-cloud/vision';
 
 // Helper function to format the private key correctly
 const formatPrivateKey = (key) => {
@@ -73,4 +73,4 @@ const initVisionClient = () => {
 // Export the Vision client
 const visionClient = initVisionClient();
 
-module.exports = { visionClient }; 
+export { visionClient }; 

@@ -1,4 +1,11 @@
 /** @type {import('next').NextConfig} */
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+// Get the directory name using ES module approach
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
@@ -50,4 +57,4 @@ const nextConfig = {
   }
 }
 
-module.exports = nextConfig // Force deploy Sun Mar  2 13:07:58 EST 2025
+export default nextConfig // Force deploy Sun Mar  2 13:07:58 EST 2025

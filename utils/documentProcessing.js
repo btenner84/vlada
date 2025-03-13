@@ -3,11 +3,17 @@ import OpenAI from 'openai';
 import fetch from 'node-fetch';
 import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
-const { analyzeMedicalBillText } = require('./openaiClient');
-import { matchServiceToCPT } from './cptMatcher';
-import { matchServiceToLab } from './labMatcher';
-import { matchServiceToDrug } from './drugMatcher';
-import { matchServiceToMedicare } from './medicareMatcher';
+import { analyzeMedicalBillText } from './openaiClient.js';
+import { matchServiceToCPT } from './cptMatcher.js';
+import { matchServiceToLab } from './labMatcher.js';
+import { matchServiceToDrug } from './drugMatcher.js';
+import { matchServiceToMedicare } from './medicareMatcher.js';
+import { 
+  extractBillingCodes, 
+  enhanceServiceStructure,
+  determineServiceSetting,
+  categorizeWithAdvancedSystem
+} from './advancedClassifier.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -726,27 +732,32 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
     console.log(`[SERVICE_ENHANCEMENT] Processing service ${i + 1}/${services.length}:`, service);
     
     try {
-      // Start by copying the service
-      const enhancedService = { ...service };
+      // Start by copying the service or ensuring it has the enhanced structure
+      const enhancedService = service.billingCodes ? service : enhanceServiceStructure(service);
       
-      // Categorize the service if not already categorized
-    if (!enhancedService.category) {
-        const categoryResult = await categorizeService(service);
-      enhancedService.category = categoryResult.category;
-      enhancedService.categoryReasoning = categoryResult.reasoning;
-        console.log('[SERVICE_ENHANCEMENT] Service categorized as:', enhancedService.category);
+      // If the service already has an enhanced category, use it
+      // Otherwise, categorize using the old system for backward compatibility
+      if (!enhancedService.enhancedCategory) {
+        if (!enhancedService.category) {
+          const categoryResult = await categorizeService(service);
+          enhancedService.category = categoryResult.category;
+          enhancedService.categoryReasoning = categoryResult.reasoning;
+          console.log('[SERVICE_ENHANCEMENT] Service categorized as:', enhancedService.category);
+        }
       }
       
-      // Handle different categories with their respective matchers
-      const category = enhancedService.category;
+      // Determine which category to use for matching
+      const category = enhancedService.enhancedCategory || enhancedService.category;
+      console.log('[SERVICE_ENHANCEMENT] Using category for matching:', category);
       
+      // Handle different categories with their respective matchers
       switch (category) {
+        // Office Visits & Consultations
+        case 'Office Visits & Consultations':
         case 'Office visits and Consultations':
-        case 'Procedures and Surgeries':
-        case 'Hospital stays and emergency care visits':
-          console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for service');
+          console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Office Visit');
           const medicareMatch = await matchServiceToMedicare(service, {
-            category: enhancedService.category,
+            category: 'Office visits and Consultations', // Use old category for backward compatibility
             patientAge: patientInfo?.age,
             serviceDate: service.date,
             facilityType: billInfo?.facilityType
@@ -758,7 +769,9 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.codeConfidence = medicareMatch.confidence;
             enhancedService.codeReasoning = medicareMatch.reasoning;
             enhancedService.codeMatchMethod = medicareMatch.matchMethod;
+            enhancedService.pricingModel = 'PFS';
             
+            // Set reimbursement rates
             const facilityType = determineFacilityType(service, billInfo);
             enhancedService.facilityType = facilityType;
             
@@ -771,11 +784,83 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             }
           }
           break;
-
+          
+        // Outpatient Procedures & Surgeries
+        case 'Outpatient Procedures & Surgeries':
+        case 'Procedures and Surgeries':
+          if (enhancedService.setting !== 'inpatient') {
+            console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Outpatient Procedure');
+            const outpatientMatch = await matchServiceToMedicare(service, {
+              category: 'Procedures and Surgeries', // Use old category for backward compatibility
+              patientAge: patientInfo?.age,
+              serviceDate: service.date,
+              facilityType: 'facility' // Force facility type for outpatient procedures
+            });
+            
+            if (outpatientMatch) {
+              enhancedService.code = outpatientMatch.code;
+              enhancedService.codeDescription = outpatientMatch.description;
+              enhancedService.codeConfidence = outpatientMatch.confidence;
+              enhancedService.codeReasoning = outpatientMatch.reasoning;
+              enhancedService.codeMatchMethod = outpatientMatch.matchMethod;
+              enhancedService.pricingModel = 'OPPS';
+              
+              // Set reimbursement rates
+              enhancedService.facilityType = 'facility';
+              enhancedService.reimbursementRate = outpatientMatch.facilityRate;
+              enhancedService.reimbursementType = 'facility';
+            }
+          }
+          break;
+          
+        // Inpatient Procedures & Surgeries
+        case 'Inpatient Procedures & Surgeries':
+          console.log('[SERVICE_ENHANCEMENT] Using DRG for Inpatient Procedure');
+          if (enhancedService.billingCodes?.drgCodes?.length > 0) {
+            const drgCode = enhancedService.billingCodes.drgCodes[0].code;
+            // Look up DRG code
+            const drgMatch = await advancedClassifier.lookupDRGCode(drgCode);
+            
+            if (drgMatch) {
+              enhancedService.code = drgMatch.code;
+              enhancedService.codeDescription = drgMatch.description;
+              enhancedService.codeConfidence = 0.95;
+              enhancedService.codeReasoning = 'Matched using DRG code';
+              enhancedService.codeMatchMethod = 'drg_code';
+              enhancedService.pricingModel = 'DRG';
+              enhancedService.reimbursementRate = drgMatch.rate;
+              enhancedService.reimbursementType = 'drg';
+            }
+          } else {
+            // Fallback to Medicare matcher for inpatient procedures without DRG
+            console.log('[SERVICE_ENHANCEMENT] No DRG code found, using Medicare Fee Schedule for Inpatient Procedure');
+            const inpatientMatch = await matchServiceToMedicare(service, {
+              category: 'Procedures and Surgeries',
+              patientAge: patientInfo?.age,
+              serviceDate: service.date,
+              facilityType: 'facility'
+            });
+            
+            if (inpatientMatch) {
+              enhancedService.code = inpatientMatch.code;
+              enhancedService.codeDescription = inpatientMatch.description;
+              enhancedService.codeConfidence = inpatientMatch.confidence;
+              enhancedService.codeReasoning = inpatientMatch.reasoning;
+              enhancedService.codeMatchMethod = inpatientMatch.matchMethod;
+              enhancedService.pricingModel = 'DRG';
+              enhancedService.facilityType = 'facility';
+              enhancedService.reimbursementRate = inpatientMatch.facilityRate;
+              enhancedService.reimbursementType = 'facility';
+            }
+          }
+          break;
+          
+        // Lab & Diagnostic Tests
+        case 'Lab & Diagnostic Tests':
         case 'Lab and Diagnostic Tests':
           console.log('[SERVICE_ENHANCEMENT] Using Medicare CLFS database for Lab/Diagnostic');
           const labMatch = await matchServiceToLab(service.description, {
-            category: enhancedService.category,
+            category: 'Lab and Diagnostic Tests', // Use old category for backward compatibility
             patientAge: patientInfo?.age,
             serviceDate: service.date
           });
@@ -786,14 +871,17 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.codeConfidence = labMatch.confidence;
             enhancedService.codeReasoning = labMatch.reasoning;
             enhancedService.codeMatchMethod = labMatch.matchMethod;
-          enhancedService.reimbursementType = 'lab';
+            enhancedService.pricingModel = 'CLFS';
+            enhancedService.reimbursementType = 'lab';
             enhancedService.labRate = labMatch.rate;
             
             // Calculate potential savings
             enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
           }
           break;
-
+          
+        // Drugs & Infusions
+        case 'Drugs & Infusions (Hospital vs. Retail)':
         case 'Drugs and Infusions':
           console.log('[SERVICE_ENHANCEMENT] Using Medicare ASP database for Drugs/Infusions');
           const drugMatch = await matchServiceToDrug(service);
@@ -806,6 +894,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.codeConfidence = drugMatch.confidence;
             enhancedService.codeReasoning = drugMatch.reasoning;
             enhancedService.codeMatchMethod = drugMatch.matchMethod;
+            enhancedService.pricingModel = 'ASP';
             enhancedService.reimbursementType = 'asp';
             
             // Set both original ASP price and ASP+6%
@@ -826,15 +915,82 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             }
           }
           break;
-
+          
+        // Medical Equipment
+        case 'Medical Equipment (DME) & Therapies':
         case 'Medical Equipment':
-          console.log(`[SERVICE_ENHANCEMENT] Category ${enhancedService.category} comparison coming soon`);
-          enhancedService.reimbursementRate = 'Coming Soon';
-          enhancedService.reimbursementType = 'not_implemented';
+          console.log('[SERVICE_ENHANCEMENT] Using CPT matcher for Medical Equipment');
+          const equipmentMatch = await matchServiceToCPT(service.description, {
+            category: 'Medical Equipment',
+            patientAge: patientInfo?.age,
+            serviceDate: service.date
+          });
+          
+          if (equipmentMatch) {
+            enhancedService.code = equipmentMatch.cptCode;
+            enhancedService.codeDescription = equipmentMatch.description;
+            enhancedService.codeConfidence = equipmentMatch.confidence;
+            enhancedService.codeReasoning = equipmentMatch.reasoning;
+            enhancedService.codeMatchMethod = equipmentMatch.matchMethod;
+            enhancedService.pricingModel = 'DMEPOS';
+            enhancedService.reimbursementType = 'dme';
+            
+            if (equipmentMatch.nonFacilityRate) {
+              enhancedService.reimbursementRate = equipmentMatch.nonFacilityRate;
+            }
+          }
           break;
-
+          
+        // Hospital Stays & Emergency Visits
+        case 'Hospital Stays & Emergency Visits':
+        case 'Hospital stays and emergency care visits':
+          console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Hospital/ER');
+          const hospitalMatch = await matchServiceToMedicare(service, {
+            category: 'Hospital stays and emergency care visits', // Use old category for backward compatibility
+            patientAge: patientInfo?.age,
+            serviceDate: service.date,
+            facilityType: 'facility' // Always facility for hospital/ER
+          });
+          
+          if (hospitalMatch) {
+            enhancedService.code = hospitalMatch.code;
+            enhancedService.codeDescription = hospitalMatch.description;
+            enhancedService.codeConfidence = hospitalMatch.confidence;
+            enhancedService.codeReasoning = hospitalMatch.reasoning;
+            enhancedService.codeMatchMethod = hospitalMatch.matchMethod;
+            enhancedService.pricingModel = 'OPPS';
+            enhancedService.facilityType = 'facility';
+            enhancedService.reimbursementRate = hospitalMatch.facilityRate;
+            enhancedService.reimbursementType = 'facility';
+          }
+          break;
+          
         default:
-          console.log('[SERVICE_ENHANCEMENT] Unknown category:', enhancedService.category);
+          console.log('[SERVICE_ENHANCEMENT] Unknown category:', category);
+          // Try to use CPT matcher as fallback
+          const cptMatch = await matchServiceToCPT(service.description, {
+            patientAge: patientInfo?.age,
+            serviceDate: service.date
+          });
+          
+          if (cptMatch) {
+            enhancedService.code = cptMatch.cptCode;
+            enhancedService.codeDescription = cptMatch.description;
+            enhancedService.codeConfidence = cptMatch.confidence;
+            enhancedService.codeReasoning = cptMatch.reasoning;
+            enhancedService.codeMatchMethod = cptMatch.matchMethod;
+            
+            const facilityType = determineFacilityType(service, billInfo);
+            enhancedService.facilityType = facilityType;
+            
+            if (facilityType === 'facility' && cptMatch.facilityRate !== null) {
+              enhancedService.reimbursementRate = cptMatch.facilityRate;
+              enhancedService.reimbursementType = 'facility';
+            } else if (cptMatch.nonFacilityRate !== null) {
+              enhancedService.reimbursementRate = cptMatch.nonFacilityRate;
+              enhancedService.reimbursementType = 'non-facility';
+            }
+          }
           break;
       }
       
@@ -846,7 +1002,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
       }
       
       // Add the enhanced service to the array
-    enhancedServices.push(enhancedService);
+      enhancedServices.push(enhancedService);
       console.log('[SERVICE_ENHANCEMENT] Enhanced service result:', enhancedService);
     } catch (error) {
       console.error(`[SERVICE_ENHANCEMENT] Error enhancing service ${i + 1}:`, error);
@@ -948,27 +1104,26 @@ function calculateAge(dateOfBirth) {
 
 export async function enhancedAnalyzeWithAI(extractedText) {
   console.log('[ENHANCED_ANALYSIS] Starting enhanced AI analysis of medical bill...');
+  
   try {
-    // First verify if it's a medical bill using existing function
+    // First verify if it's a medical bill
     console.log('[ENHANCED_ANALYSIS] Verifying if document is a medical bill...');
     const verificationResult = await processWithLLM(extractedText, true);
     console.log('[ENHANCED_ANALYSIS] Verification result:', verificationResult);
-
+    
     if (!verificationResult.isMedicalBill) {
-      console.log('[ENHANCED_ANALYSIS] Document is not a medical bill, skipping enhanced analysis');
+      console.log('[ENHANCED_ANALYSIS] Document is not a medical bill. Reason:', verificationResult.reason);
       return {
         isMedicalBill: false,
         confidence: verificationResult.confidence,
         reason: verificationResult.reason
       };
     }
-
-    // If it is a medical bill, perform enhanced analysis
-    console.log('[ENHANCED_ANALYSIS] Document is a medical bill, performing enhanced analysis...');
     
-    // Use OpenAI to extract structured data
-    console.log('[ENHANCED_ANALYSIS] Starting OpenAI analysis of medical bill text...');
-    console.log(`[ENHANCED_ANALYSIS] Text length: ${extractedText.length} characters`);
+    // Extract billing codes from text
+    console.log('[ENHANCED_ANALYSIS] Extracting billing codes from text...');
+    const extractedCodes = extractBillingCodes(extractedText);
+    console.log('[ENHANCED_ANALYSIS] Extracted billing codes:', JSON.stringify(extractedCodes, null, 2));
     
     try {
       const enhancedData = await processWithLLM(extractedText, false);
@@ -977,10 +1132,34 @@ export async function enhancedAnalyzeWithAI(extractedText) {
       
       // Check if services were extracted
       if (enhancedData.services && enhancedData.services.length > 0) {
-        console.log(`[ENHANCED_ANALYSIS] Found ${enhancedData.services.length} services, will enhance with CPT codes`);
+        console.log(`[ENHANCED_ANALYSIS] Found ${enhancedData.services.length} services, will enhance with advanced classification`);
+        
+        // Add extracted codes to each service
+        enhancedData.services = await Promise.all(enhancedData.services.map(async (service) => {
+          // Enhance service structure
+          const enhancedService = enhanceServiceStructure(service);
+          
+          // Determine service setting (inpatient/outpatient)
+          enhancedService.setting = determineServiceSetting(service, extractedCodes);
+          
+          // Add extracted codes to the service
+          enhancedService.billingCodes = extractedCodes;
+          
+          // Categorize with advanced system
+          const categoryResult = await categorizeWithAdvancedSystem(enhancedService, extractedCodes);
+          enhancedService.enhancedCategory = categoryResult.category;
+          enhancedService.categoryReasoning = categoryResult.reasoning;
+          enhancedService.pricingModel = categoryResult.pricingModel;
+          
+          return enhancedService;
+        }));
       } else {
-        console.log('[ENHANCED_ANALYSIS] No services found in extracted data, skipping CPT enhancement');
+        console.log('[ENHANCED_ANALYSIS] No services found in extracted data, skipping advanced classification');
       }
+      
+      // Add billing codes to the top level
+      enhancedData.billingCodes = extractedCodes;
+      enhancedData.advancedClassification = true;
       
       return {
         isMedicalBill: true,

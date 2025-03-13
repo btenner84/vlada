@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 /**
  * Client for interacting with OpenAI API for medical bill analysis
@@ -82,6 +82,6 @@ Return ONLY valid JSON without explanations or markdown formatting. If informati
   }
 }
 
-module.exports = {
+export {
   analyzeMedicalBillText
 }; 

@@ -10,10 +10,11 @@ import {
   extractTextFromImage,
   processWithLLM,
   enhancedAnalyzeWithAI
-} from '../../utils/documentProcessing';
-import { visionClient } from '../../utils/visionClient';
-import { matchServiceToCPT } from '../../utils/cptMatcher';
-import { adminDb as existingAdminDb, adminStorage as existingAdminStorage } from '../../firebase/admin';
+} from '../../utils/documentProcessing.js';
+import { visionClient } from '../../utils/visionClient.js';
+import { matchServiceToCPT } from '../../utils/cptMatcher.js';
+import { adminDb as existingAdminDb, adminStorage as existingAdminStorage } from '../../firebase/admin.js';
+import { extractBillingCodes } from '../../utils/advancedClassifier.js';
 
 // Use the existing Firebase Admin instance if available, otherwise initialize a new one
 let adminDb = existingAdminDb;
@@ -150,6 +151,11 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     console.log(`Text extracted, length: ${extractedText.length} characters`);
     console.log(`First 100 chars: ${extractedText.substring(0, 100)}`);
     
+    // Extract billing codes from text
+    console.log('Extracting billing codes from text...');
+    const extractedCodes = extractBillingCodes(extractedText);
+    console.log('Billing codes extracted:', JSON.stringify(extractedCodes, null, 2));
+    
     // Use our enhanced AI analysis
     console.log('Starting enhanced AI analysis...');
     const enhancedAnalysisResult = await enhancedAnalyzeWithAI(extractedText);
@@ -197,7 +203,9 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
           analyzedAtString: now.toISOString(),
           status: 'analyzed',
           fileType: fileType,
-          enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false
+          enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false,
+          advancedClassification: extractedData?.advancedClassification || false,
+          billingCodes: extractedCodes
         });
         
         await billRef.update({
@@ -221,7 +229,9 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
       isMedicalBill: enhancedAnalysisResult.isMedicalBill,
       confidence: enhancedAnalysisResult.confidence,
       reason: enhancedAnalysisResult.reason,
-      enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false
+      enhancedAnalysis: enhancedAnalysisResult.enhancedData ? true : false,
+      advancedClassification: extractedData?.advancedClassification || false,
+      billingCodes: extractedCodes
     };
   } catch (error) {
     console.error('Error analyzing document:', error);
@@ -232,6 +242,7 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
 export default async function handler(req, res) {
   console.log('API Route: /api/analyze-full - Request received');
   console.log('Request Method:', req.method);
+  console.log('Request Body:', req.body);
   
   // Add CORS headers
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -239,7 +250,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
   );
 
   // Handle preflight request
@@ -260,12 +271,24 @@ export default async function handler(req, res) {
 
   try {
     // Check for required environment variables
-    if (!process.env.GOOGLE_CLOUD_CLIENT_EMAIL || 
-        !process.env.GOOGLE_CLOUD_PRIVATE_KEY || 
-        !process.env.GOOGLE_CLOUD_PROJECT_ID) {
-      console.error('Missing required Google Cloud Vision environment variables');
+    const requiredEnvVars = {
+      'GOOGLE_CLOUD_CLIENT_EMAIL': process.env.GOOGLE_CLOUD_CLIENT_EMAIL,
+      'GOOGLE_CLOUD_PRIVATE_KEY': process.env.GOOGLE_CLOUD_PRIVATE_KEY,
+      'GOOGLE_CLOUD_PROJECT_ID': process.env.GOOGLE_CLOUD_PROJECT_ID,
+      'FIREBASE_PROJECT_ID': process.env.FIREBASE_PROJECT_ID,
+      'FIREBASE_CLIENT_EMAIL': process.env.FIREBASE_CLIENT_EMAIL,
+      'FIREBASE_PRIVATE_KEY': process.env.FIREBASE_PRIVATE_KEY,
+      'FIREBASE_STORAGE_BUCKET': process.env.FIREBASE_STORAGE_BUCKET
+    };
+
+    const missingEnvVars = Object.entries(requiredEnvVars)
+      .filter(([_, value]) => !value)
+      .map(([key]) => key);
+
+    if (missingEnvVars.length > 0) {
+      console.error('Missing required environment variables:', missingEnvVars);
       return res.status(500).json({ 
-        error: 'Server configuration error: Missing required Google Cloud Vision environment variables' 
+        error: `Server configuration error: Missing required environment variables: ${missingEnvVars.join(', ')}` 
       });
     }
     
@@ -275,23 +298,33 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Firebase Admin SDK not initialized' });
     }
     
-    // Get the request body
+    // Get and validate the request body
     const { fileUrl, userId, billId } = req.body;
     
     if (!fileUrl) {
       console.log('Missing required parameter: fileUrl');
       return res.status(400).json({ error: 'Missing required parameter: fileUrl' });
     }
-    
-    console.log('Request parameters:', { fileUrl, userId, billId });
+
+    // Log the request parameters (but mask sensitive parts of the URL)
+    const maskedUrl = fileUrl.replace(/([?&]token=)[^&]+/, '$1REDACTED');
+    console.log('Request parameters:', { 
+      fileUrl: maskedUrl, 
+      userId: userId || 'client-request', 
+      billId: billId || 'client-request' 
+    });
     
     // Verify document ownership only if userId and billId are provided
-    if (userId && billId) {
+    if (userId && billId && userId !== 'client-request' && billId !== 'client-request') {
       console.log('Verifying document ownership');
       try {
         const billDoc = await adminDb.collection('bills').doc(billId).get();
         if (!billDoc.exists || billDoc.data().userId !== userId) {
-          console.log('Unauthorized access attempt:', { billExists: billDoc.exists, requestUserId: userId, docUserId: billDoc.exists ? billDoc.data().userId : null });
+          console.log('Unauthorized access attempt:', { 
+            billExists: billDoc.exists, 
+            requestUserId: userId, 
+            docUserId: billDoc.exists ? billDoc.data().userId : null 
+          });
           return res.status(403).json({ error: 'Unauthorized access to this document' });
         }
         console.log('Document ownership verified');
@@ -309,21 +342,26 @@ export default async function handler(req, res) {
     
     // Return the results
     console.log('Analysis complete, returning results');
-    res.status(200).json(result);
+    return res.status(200).json(result);
     
   } catch (error) {
     console.error('Error in analyze-full endpoint:', error);
-    res.status(500).json({ error: error.message || 'Error analyzing document' });
+    // Send a more detailed error response
+    return res.status(500).json({ 
+      error: error.message || 'Error analyzing document',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      details: error.details || undefined
+    });
   }
 }
 
-// Add this export at the very end of the file, after the handler function
+// Fix the export config syntax
 export const config = {
   api: {
     bodyParser: {
       sizeLimit: '10mb',
     },
-    responseLimit: false,
+    responseLimit: false
   },
-  maxDuration: 300  // Increase to 5 minutes
+  maxDuration: 300
 }; 
