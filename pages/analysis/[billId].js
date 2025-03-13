@@ -112,6 +112,8 @@ export default function BillAnalysis() {
   const [answerData, setAnswerData] = useState('');
   const [isAskingQuestion, setIsAskingQuestion] = useState(false);
   const [expandedReasoningId, setExpandedReasoningId] = useState(null);
+  const [analysisError, setAnalysisError] = useState(null);
+  const [billingCodes, setBillingCodes] = useState([]);
 
   // Helper function to clean up patient names
   const cleanPatientName = (name) => {
@@ -359,41 +361,39 @@ export default function BillAnalysis() {
       console.log('Current hostname:', hostname);
       console.log('Current origin:', origin);
       
-      // First, test the diagnostic endpoint
+      // Test the diagnostic endpoint first
       try {
         console.log('Testing diagnostic endpoint...');
-        const testApiUrl = `${origin}/api/analyze-test`;
-        const testResponse = await fetch(testApiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ test: true })
-        });
+        const diagnosticUrl = `${origin}/api/analyze-universal`;
+        const diagnosticResponse = await fetch(diagnosticUrl);
         
-        if (testResponse.ok) {
-          const testData = await testResponse.json();
-          console.log('Diagnostic endpoint response:', testData);
+        if (diagnosticResponse.ok) {
+          const diagnosticData = await diagnosticResponse.json();
+          console.log('Diagnostic endpoint response:', diagnosticData);
         } else {
-          console.error('Diagnostic endpoint failed:', testResponse.status);
+          console.warn('Diagnostic endpoint check failed:', diagnosticResponse.status);
         }
       } catch (testError) {
-        console.error('Error testing diagnostic endpoint:', testError);
+        console.warn('Error testing diagnostic endpoint:', testError);
+        // Continue anyway - this is just a diagnostic check
       }
       
-      // Construct API URL - use the new universal endpoint
-      const apiUrl = `${origin}/api/analyze-universal`;
-      console.log('API URL:', apiUrl);
+      // Construct API URLs
+      const mainApiUrl = `${origin}/api/analyze-universal`;
+      const fallbackApiUrl = `${origin}/api/analyze-fallback`;
+      console.log('Main API URL:', mainApiUrl);
+      console.log('Fallback API URL:', fallbackApiUrl);
       
       // Try multiple approaches to handle potential Vercel issues
       let response;
       let responseData;
+      let errorDetails = {};
+      let usedFallback = false;
       
-      // First try POST request
+      // First try POST request to main endpoint
       try {
-        console.log('Attempting POST request to universal endpoint');
-        response = await fetch(apiUrl, {
+        console.log('Attempting POST request to main endpoint');
+        response = await fetch(mainApiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -403,11 +403,21 @@ export default function BillAnalysis() {
         });
         
         console.log('POST response status:', response.status);
+        errorDetails.postStatus = response.status;
         
         if (response.ok) {
           responseData = await response.json();
           console.log('POST request successful');
         } else {
+          // Try to get error details if possible
+          try {
+            const errorResponse = await response.json();
+            console.error('POST request error details:', errorResponse);
+            errorDetails.postError = errorResponse;
+          } catch (e) {
+            console.error('Could not parse POST error response');
+          }
+          
           console.log('POST request failed, trying GET request');
           
           // If POST fails, try GET with query parameters
@@ -417,7 +427,7 @@ export default function BillAnalysis() {
             billId: billId
           }).toString();
           
-          const getUrl = `${apiUrl}?${queryParams}`;
+          const getUrl = `${mainApiUrl}?${queryParams}`;
           console.log('GET URL:', getUrl);
           
           response = await fetch(getUrl, {
@@ -428,37 +438,150 @@ export default function BillAnalysis() {
           });
           
           console.log('GET response status:', response.status);
+          errorDetails.getStatus = response.status;
           
           if (response.ok) {
             responseData = await response.json();
             console.log('GET request successful');
           } else {
-            throw new Error(`API request failed: ${response.status}`);
+            // Try to get error details if possible
+            try {
+              const errorResponse = await response.json();
+              console.error('GET request error details:', errorResponse);
+              errorDetails.getError = errorResponse;
+            } catch (e) {
+              console.error('Could not parse GET error response');
+            }
+            
+            // If both POST and GET fail, try the fallback endpoint
+            console.log('Both POST and GET requests failed, trying fallback endpoint');
+            
+            // Try POST to fallback endpoint
+            response = await fetch(fallbackApiUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify(requestBody)
+            });
+            
+            console.log('Fallback POST response status:', response.status);
+            errorDetails.fallbackPostStatus = response.status;
+            
+            if (response.ok) {
+              responseData = await response.json();
+              console.log('Fallback POST request successful');
+              usedFallback = true;
+            } else {
+              // Try GET to fallback endpoint
+              const fallbackGetUrl = `${fallbackApiUrl}?${queryParams}`;
+              console.log('Fallback GET URL:', fallbackGetUrl);
+              
+              response = await fetch(fallbackGetUrl, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              
+              console.log('Fallback GET response status:', response.status);
+              errorDetails.fallbackGetStatus = response.status;
+              
+              if (response.ok) {
+                responseData = await response.json();
+                console.log('Fallback GET request successful');
+                usedFallback = true;
+              } else {
+                throw new Error(`All API requests failed. Last status: ${response.status}`);
+              }
+            }
           }
         }
         
         // Process the response data
-        if (responseData && responseData.success) {
-          setExtractedData(responseData.extractedData);
-          setIsMedicalBill(responseData.isMedicalBill);
-          setAnalysisStatus('complete');
-          setProcessingMethod(responseData.processingMethod || 'server');
-          setRawData(prev => ({ ...prev, extractedText: responseData.extractedText }));
+        if (responseData && (responseData.success || responseData.status === 'processing')) {
+          if (usedFallback) {
+            // If we used the fallback endpoint, the document is being processed asynchronously
+            setAnalysisStatus('queued');
+            setProcessingMethod('async');
+            
+            // Update UI to show that the document is being processed
+            setExtractedData({
+              status: 'processing',
+              message: 'Your document is being processed. This may take a few minutes.',
+              timestamp: responseData.timestamp
+            });
+            
+            // Set a timer to check the status periodically
+            const checkStatusInterval = setInterval(async () => {
+              try {
+                const billDoc = await getDoc(billRef);
+                if (billDoc.exists() && billDoc.data().status === 'analyzed') {
+                  clearInterval(checkStatusInterval);
+                  
+                  // Reload the page to get the latest data
+                  window.location.reload();
+                }
+              } catch (error) {
+                console.error('Error checking bill status:', error);
+              }
+            }, 10000); // Check every 10 seconds
+            
+            // Clear the interval after 5 minutes (30 checks)
+            setTimeout(() => {
+              clearInterval(checkStatusInterval);
+              setAnalysisStatus('error');
+              setAnalysisError({
+                message: 'Processing timeout. Please try again later.',
+                details: { timeout: true }
+              });
+            }, 5 * 60 * 1000);
+          } else {
+            // Normal processing with the main endpoint
+            setExtractedData(responseData.extractedData);
+            setIsMedicalBill(responseData.isMedicalBill);
+            setAnalysisStatus('complete');
+            setProcessingMethod(responseData.processingMethod || 'server');
+            setRawData(prev => ({ ...prev, extractedText: responseData.extractedText }));
+            
+            // If we have billing codes, store them
+            if (responseData.billingCodes) {
+              setBillingCodes(responseData.billingCodes);
+            }
+            
+            // Update the bill document with the analysis results if needed
+            if (responseData.isMedicalBill && responseData.extractedData) {
+              try {
+                await updateDoc(billRef, {
+                  status: 'analyzed',
+                  lastUpdated: serverTimestamp()
+                });
+              } catch (updateError) {
+                console.error('Error updating bill status:', updateError);
+                // Continue anyway - this is not critical
+              }
+            }
+          }
         } else {
           throw new Error(responseData?.error || 'Analysis failed');
         }
       } catch (error) {
         console.error('Error in data extraction:', error);
-        console.error('Error in data extraction process:', error);
-        setError(error.message);
         setAnalysisStatus('error');
+        setAnalysisError({
+          message: error.message,
+          details: errorDetails
+        });
+        throw error;
       }
     } catch (error) {
-      console.error('Error in data extraction:', error);
       console.error('Error in data extraction process:', error);
-      setError(error.message);
       setAnalysisStatus('error');
+      return false;
     }
+    
+    return true;
   };
 
   // Add useEffect hooks to log changes to rawData and extractedData

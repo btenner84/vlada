@@ -242,7 +242,7 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
 export default async function handler(req, res) {
   console.log('API Route: /api/analyze-universal - Request received');
   console.log('Request Method:', req.method);
-  console.log('Request Headers:', JSON.stringify(req.headers));
+  console.log('Request Headers:', JSON.stringify(req.headers, null, 2));
   console.log('Request Body:', req.body);
   console.log('Request Query:', req.query);
   
@@ -307,24 +307,38 @@ export default async function handler(req, res) {
     // Get parameters from either query (GET) or body (POST)
     let fileUrl, userId, billId;
     
-    if (req.method === 'POST') {
+    // Unified parameter extraction that works with both GET and POST
+    if (req.method === 'POST' && req.body) {
       // Get from request body
-      ({ fileUrl, userId, billId } = req.body);
-    } else if (req.method === 'GET') {
-      // Get from query parameters
-      ({ fileUrl, userId, billId } = req.query);
+      fileUrl = req.body.fileUrl;
+      userId = req.body.userId;
+      billId = req.body.billId;
+      console.log('Extracted parameters from POST body');
     } else {
-      // Unsupported method
-      console.log(`Unsupported method: ${req.method}`);
-      return res.status(405).json({ 
-        error: `Method ${req.method} Not Allowed`,
-        supportedMethods: ['GET', 'POST', 'OPTIONS']
-      });
+      // Get from query parameters (works for both GET and POST if body parsing fails)
+      fileUrl = req.query.fileUrl;
+      userId = req.query.userId;
+      billId = req.query.billId;
+      console.log('Extracted parameters from query string');
     }
     
     if (!fileUrl) {
       console.log('Missing required parameter: fileUrl');
-      return res.status(400).json({ error: 'Missing required parameter: fileUrl' });
+      return res.status(400).json({ 
+        error: 'Missing required parameter: fileUrl',
+        receivedParams: {
+          fromBody: req.body ? { 
+            hasFileUrl: !!req.body.fileUrl,
+            hasUserId: !!req.body.userId,
+            hasBillId: !!req.body.billId
+          } : 'No body',
+          fromQuery: { 
+            hasFileUrl: !!req.query.fileUrl,
+            hasUserId: !!req.query.userId,
+            hasBillId: !!req.query.billId
+          }
+        }
+      });
     }
 
     // Log the request parameters (but mask sensitive parts of the URL)
@@ -359,12 +373,33 @@ export default async function handler(req, res) {
     
     // Analyze the document
     console.log('Starting document analysis');
-    const result = await analyzeDocument(fileUrl, userId || 'client-request', billId || 'client-request');
-    
-    // Return the results
-    console.log('Analysis complete, returning results');
-    return res.status(200).json(result);
-    
+    try {
+      const result = await analyzeDocument(fileUrl, userId || 'client-request', billId || 'client-request');
+      
+      // Return the results
+      console.log('Analysis complete, returning results');
+      return res.status(200).json(result);
+    } catch (analysisError) {
+      console.error('Error in document analysis:', analysisError);
+      
+      // Handle Sharp module error specifically
+      if (analysisError.message && analysisError.message.includes('sharp')) {
+        console.log('Detected Sharp module error, providing helpful error message');
+        return res.status(500).json({
+          error: 'Image processing library error in serverless environment',
+          message: 'The server encountered an issue with the image processing library. This is a known issue with the Sharp module in serverless environments.',
+          suggestion: 'Please try again or contact support if the issue persists.',
+          originalError: analysisError.message
+        });
+      }
+      
+      // Return a detailed error for other cases
+      return res.status(500).json({
+        error: 'Error analyzing document',
+        message: analysisError.message,
+        stack: process.env.NODE_ENV === 'development' ? analysisError.stack : undefined
+      });
+    }
   } catch (error) {
     console.error('Error in analyze-universal endpoint:', error);
     // Send a more detailed error response
