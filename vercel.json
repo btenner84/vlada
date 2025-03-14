@@ -24,7 +24,7 @@
       "src": "package.json",
       "use": "@vercel/next",
       "config": {
-        "installCommand": "apt-get update && apt-get install -y libvips-dev && npm install --platform=linux --arch=x64 sharp && npm install",
+        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install",
         "buildCommand": "npm run build"
       }
     }

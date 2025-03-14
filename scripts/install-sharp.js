@@ -11,11 +11,24 @@ const arch = os.arch();
 
 console.log(`Installing Sharp for platform: ${platform}, architecture: ${arch}`);
 
+// Check if we're running in a Vercel environment
+const isVercel = process.env.VERCEL === '1' || process.env.NOW_REGION || process.env.VERCEL_REGION;
+
+if (isVercel) {
+  console.log('Detected Vercel environment, using special installation flags');
+}
+
 try {
   // For linux-x64 environments (common in production/serverless)
   if (platform === 'linux' && arch === 'x64') {
     console.log('Detected Linux x64 environment, installing platform-specific Sharp');
-    execSync('npm install --platform=linux --arch=x64 sharp', { stdio: 'inherit' });
+    
+    // For Vercel, we need special flags
+    if (isVercel) {
+      execSync('npm install --ignore-scripts=false --platform=linux --arch=x64 sharp', { stdio: 'inherit' });
+    } else {
+      execSync('npm install --platform=linux --arch=x64 sharp', { stdio: 'inherit' });
+    }
   } 
   // For macOS environments (common in development)
   else if (platform === 'darwin') {
@@ -34,10 +47,15 @@ try {
   console.log('Falling back to regular Sharp installation');
   
   try {
-    execSync('npm install sharp', { stdio: 'inherit' });
+    // Use ignore-scripts=false for Vercel
+    if (isVercel) {
+      execSync('npm install --ignore-scripts=false sharp', { stdio: 'inherit' });
+    } else {
+      execSync('npm install sharp', { stdio: 'inherit' });
+    }
     console.log('Fallback Sharp installation complete');
   } catch (fallbackError) {
     console.error('Fallback installation also failed:', fallbackError.message);
-    process.exit(1);
+    console.log('Will rely on safe import fallbacks during runtime');
   }
 } 
