@@ -24,10 +24,13 @@
       "src": "package.json",
       "use": "@vercel/next",
       "config": {
-        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install",
-        "maxDuration": 300,
-        "memory": 3008
+        "installCommand": "apt-get update && apt-get install -y libvips-dev && npm install --platform=linux --arch=x64 sharp && npm install",
+        "buildCommand": "npm run build"
       }
     }
-  ]
+  ],
+  "env": {
+    "NODE_ENV": "production",
+    "SHARP_IGNORE_GLOBAL_LIBVIPS": "1"
+  }
 } 

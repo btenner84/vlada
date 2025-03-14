@@ -17,6 +17,7 @@ import {
   determineServiceSetting,
   categorizeWithAdvancedSystem
 } from './advancedClassifier.js';
+import { getSafeSharp } from './safeImports.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -67,19 +68,30 @@ async function preprocessImage(imageBuffer) {
   try {
     console.log('Pre-processing image...');
     
-    // First convert to PNG format to ensure compatibility
-    const pngBuffer = await sharp(imageBuffer)
-      .toFormat('png')
-      .toBuffer();
-    
-    console.log('Converted image to PNG format');
-    
-    // Then apply enhancements for better OCR
-    return await sharp(pngBuffer)
-      .grayscale() // Convert to grayscale
-      .normalize() // Normalize the image contrast
-      .sharpen() // Sharpen the image
-      .toBuffer();
+    try {
+      // Use our safe Sharp import instead of direct import
+      const safeSharp = await getSafeSharp();
+      
+      // First convert to PNG format to ensure compatibility
+      const pngBuffer = await safeSharp(imageBuffer)
+        .toFormat('png')
+        .toBuffer();
+      
+      console.log('Converted image to PNG format');
+      
+      // Then apply enhancements for better OCR
+      return await safeSharp(pngBuffer)
+        .grayscale() // Convert to grayscale
+        .normalize() // Normalize the image contrast
+        .sharpen() // Sharpen the image
+        .toBuffer();
+    } catch (sharpError) {
+      console.error('Sharp module error during image pre-processing:', sharpError);
+      console.log('Using fallback mechanism without image enhancement');
+      
+      // Return original buffer when Sharp fails
+      return imageBuffer;
+    }
   } catch (error) {
     console.error('Image pre-processing error:', error);
     console.log('Returning original buffer without preprocessing');

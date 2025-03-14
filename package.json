@@ -8,6 +8,9 @@
     "test": "node scripts/test-advanced-classification.js",
     "dev": "next dev",
     "build": "next build",
+    "postinstall": "node scripts/install-sharp.js",
+    "prepare-sharp": "node -e \"try { require('./sharp.config.js').afterInstall() } catch(e) { console.error(e) }\"",
+    "prebuild": "npm run prepare-sharp",
     "start": "next start"
   },
   "dependencies": {

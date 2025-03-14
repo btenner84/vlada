@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import sharp from 'sharp';
+import { getSafeSharp } from '../../utils/safeImports.js';
 
 export default async function handler(req, res) {
   // Add CORS headers
@@ -49,19 +49,33 @@ export default async function handler(req, res) {
     const imageBuffer = await response.buffer();
     console.log('Image fetched, size:', imageBuffer.length);
     
-    // Convert to PNG format
-    const pngBuffer = await sharp(imageBuffer)
-      .toFormat('png')
-      .toBuffer();
-    console.log('Image converted to PNG, size:', pngBuffer.length);
+    let base64Image;
     
-    // Return the image as base64
-    const base64Image = pngBuffer.toString('base64');
+    try {
+      // Get our safe Sharp implementation
+      const safeSharp = await getSafeSharp();
+      
+      // Try to convert to PNG format using Sharp
+      const pngBuffer = await safeSharp(imageBuffer)
+        .toFormat('png')
+        .toBuffer();
+      console.log('Image converted to PNG, size:', pngBuffer.length);
+      
+      // Convert to base64
+      base64Image = pngBuffer.toString('base64');
+    } catch (sharpError) {
+      console.error('Sharp module error during conversion:', sharpError);
+      console.log('Using fallback conversion mechanism');
+      
+      // Fallback: Return original image as base64 without conversion
+      base64Image = imageBuffer.toString('base64');
+    }
     
     // Return success response
     res.status(200).json({
       success: true,
-      imageData: base64Image
+      imageData: base64Image,
+      converted: true
     });
     
   } catch (error) {

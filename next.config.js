@@ -16,6 +16,12 @@ const nextConfig = {
     PROJECT_ROOT: __dirname,
   },
   webpack: (config, { isServer }) => {
+    // Sharp-specific configuration for serverless environments
+    if (isServer) {
+      // Ensure Sharp is properly handled in serverless environments
+      config.externals = [...config.externals, 'sharp'];
+    }
+    
     if (!isServer) {
       config.resolve.fallback = {
         ...config.resolve.fallback,
@@ -29,7 +35,7 @@ const nextConfig = {
     return config;
   },
   experimental: {
-    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch', '@google-cloud/vision', 'firebase-admin']
+    serverComponentsExternalPackages: ['pdf-parse', 'node-fetch', '@google-cloud/vision', 'firebase-admin', 'sharp']
   },
   images: {
     domains: ['firebasestorage.googleapis.com']
