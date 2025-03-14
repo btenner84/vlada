@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
 
 export default function TestProgress() {
-  const { currentUser } = useAuth();
+  const [currentUser, setCurrentUser] = useState(null);
   const [billId, setBillId] = useState(`test-bill-${Date.now()}`);
   const [stage, setStage] = useState('Testing');
   const [progress, setProgress] = useState(50);
@@ -12,6 +11,15 @@ export default function TestProgress() {
   const [result, setResult] = useState(null);
   const [progressData, setProgressData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // Add auth listener
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      setCurrentUser(user);
+    });
+    
+    return () => unsubscribe();
+  }, []);
 
   // Listen for progress updates
   useEffect(() => {
