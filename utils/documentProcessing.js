@@ -1064,8 +1064,23 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.codeMatchMethod = hospitalMatch.matchMethod;
             enhancedService.pricingModel = 'OPPS';
             enhancedService.facilityType = 'facility';
-            enhancedService.reimbursementRate = hospitalMatch.facilityRate;
             enhancedService.reimbursementType = 'facility';
+            
+            // Log whether this was a database match or fallback
+            if (hospitalMatch.reasoning && hospitalMatch.reasoning.includes('database')) {
+              console.log('[SERVICE_ENHANCEMENT] Using database rates for hospital/ER service');
+            } else {
+              console.log('[SERVICE_ENHANCEMENT] Using fallback rates for hospital/ER service:', hospitalMatch.reasoning);
+            }
+            
+            // Always use facility rate for emergency services
+            if (hospitalMatch.facilityRate !== null) {
+              enhancedService.reimbursementRate = hospitalMatch.facilityRate;
+            } else if (hospitalMatch.nonFacilityRate !== null) {
+              // Fallback to non-facility rate if facility rate is not available
+              enhancedService.reimbursementRate = hospitalMatch.nonFacilityRate;
+              console.log('[SERVICE_ENHANCEMENT] WARNING: Using non-facility rate for hospital/ER service due to missing facility rate');
+            }
           }
           break;
           

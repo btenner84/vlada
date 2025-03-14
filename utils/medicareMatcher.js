@@ -9,9 +9,9 @@ const openai = new OpenAI({
 // Enhanced common Medicare rates with more specific codes and descriptions
 const commonMedicareRates = {
   // Emergency department visits
-  '99283': { code: '99283', description: 'Emergency department visit, moderate severity', nonFacilityRate: 102.48, facilityRate: 51.24 },
-  '99284': { code: '99284', description: 'Emergency department visit, high severity', nonFacilityRate: 155.40, facilityRate: 77.70 },
-  '99285': { code: '99285', description: 'Emergency department visit, highest severity', nonFacilityRate: 229.32, facilityRate: 114.66 },
+  '99283': { code: '99283', description: 'Emergency department visit, moderate severity', nonFacilityRate: 102.48, facilityRate: 102.48 },
+  '99284': { code: '99284', description: 'Emergency department visit, high severity', nonFacilityRate: 155.40, facilityRate: 114.46 },
+  '99285': { code: '99285', description: 'Emergency department visit, highest severity', nonFacilityRate: 229.32, facilityRate: 169.28 },
   
   // IV push services
   '96374': { code: '96374', description: 'IV push, single or initial substance/drug', nonFacilityRate: 74.52, facilityRate: 37.26 },
@@ -278,22 +278,12 @@ async function lookupMedicareRate(code) {
   try {
     console.log(`[MEDICARE_MATCHER] Looking up Medicare rate for code: ${code}`);
     
-    // Check common Medicare rates first
-    if (commonMedicareRates[code]) {
-      const data = commonMedicareRates[code];
-      console.log(`[MEDICARE_MATCHER] Found common Medicare rate: ${code}`, data);
-      return {
-        code: data.code,
-        description: data.description,
-        nonFacilityRate: data.nonFacilityRate,
-        facilityRate: data.facilityRate,
-        reasoning: 'Direct match from common Medicare rates'
-      };
-    }
-    
-    // Try to find in Firestore
+    // Try to find in Firestore first (prioritize database rates)
+    let databaseMatch = null;
     try {
       if (adminDb) {
+        console.log(`[MEDICARE_MATCHER] Checking for code ${code} in Firestore database first`);
+        
         // First try medicareCodes collection
         let docRef = await adminDb.collection('medicareCodes').doc(code).get();
         
@@ -305,17 +295,35 @@ async function lookupMedicareRate(code) {
         if (docRef.exists) {
           const data = docRef.data();
           console.log(`[MEDICARE_MATCHER] Found Medicare rate data in database:`, data);
-          return {
+          databaseMatch = {
             code: data.code,
             description: data.description,
             nonFacilityRate: data.nonFacilityRate || null,
             facilityRate: data.facilityRate || null,
             reasoning: 'Match from Medicare Fee Schedule database'
           };
+          
+          // Return database match immediately
+          return databaseMatch;
+        } else {
+          console.log(`[MEDICARE_MATCHER] Code ${code} not found in database`);
         }
       }
     } catch (firestoreError) {
       console.error('[MEDICARE_MATCHER] Firestore error:', firestoreError.message);
+    }
+    
+    // If not found in database, check common Medicare rates as fallback
+    if (commonMedicareRates[code]) {
+      const data = commonMedicareRates[code];
+      console.log(`[MEDICARE_MATCHER] Found fallback rate in common Medicare rates: ${code}`, data);
+      return {
+        code: data.code,
+        description: data.description,
+        nonFacilityRate: data.nonFacilityRate,
+        facilityRate: data.facilityRate,
+        reasoning: 'Fallback match from common Medicare rates (not found in database)'
+      };
     }
     
     console.log(`[MEDICARE_MATCHER] No Medicare rate found for code: ${code}`);
@@ -549,34 +557,62 @@ async function matchOfficeVisit(description, service, context) {
  */
 async function matchEmergencyCare(description, service, context) {
   try {
-  console.log('[MEDICARE_MATCHER] Matching emergency care service');
-  
+    console.log('[MEDICARE_MATCHER] Matching emergency care service:', description);
+    
     const normalizedDesc = description.toLowerCase();
     
-    // Determine severity level
+    // First, check if the original service has a code that we can use
+    if (service.code) {
+      console.log(`[MEDICARE_MATCHER] Service has code: ${service.code}, trying direct lookup`);
+      const directMatch = await lookupMedicareRate(service.code);
+      if (directMatch) {
+        console.log(`[MEDICARE_MATCHER] Found direct match for code ${service.code} in emergency care`);
+        return {
+          ...directMatch,
+          confidence: 0.95,
+          reasoning: `Direct match by code ${service.code} for emergency care service`,
+          matchMethod: 'emergency_care_direct_code'
+        };
+      }
+    }
+    
+    // Otherwise, determine severity level based on keywords
+    console.log('[MEDICARE_MATCHER] Determining emergency service severity level from description');
     let code = '99283'; // Default to moderate severity
     
     if (normalizedDesc.includes('critical') || 
         normalizedDesc.includes('severe') || 
         normalizedDesc.includes('highest')) {
       code = '99285';
+      console.log('[MEDICARE_MATCHER] Detected highest severity (99285) from description');
     } else if (normalizedDesc.includes('high') || 
                normalizedDesc.includes('complex')) {
       code = '99284';
+      console.log('[MEDICARE_MATCHER] Detected high severity (99284) from description');
+    } else {
+      console.log('[MEDICARE_MATCHER] Using default moderate severity (99283)');
     }
     
-    // Look up the rate
+    // Check if description is for general ER service, which is typically level 4
+    if (normalizedDesc.includes('emergency room general') || 
+        normalizedDesc.includes('emergency department general') ||
+        (normalizedDesc.includes('emergency') && normalizedDesc.includes('general'))) {
+      code = '99284'; // Override to code 99284 for "EMERGENCY ROOM-GENERAL"
+      console.log('[MEDICARE_MATCHER] Override to high severity (99284) for general ER service');
+    }
+    
+    // Look up the rate in database first
     const rateInfo = await lookupMedicareRate(code);
     if (rateInfo) {
       return {
         ...rateInfo,
-        confidence: 0.85,
+        confidence: 0.9,
         reasoning: `Matched as emergency department visit with ${code === '99285' ? 'highest' : code === '99284' ? 'high' : 'moderate'} severity`,
         matchMethod: 'emergency_care_pattern'
-    };
-  }
-  
-  return null;
+      };
+    }
+    
+    return null;
   } catch (error) {
     console.error('[MEDICARE_MATCHER] Error matching emergency care:', error);
     return null;
