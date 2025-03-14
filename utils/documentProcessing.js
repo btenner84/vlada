@@ -979,6 +979,13 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.reimbursementType = 'lab';
             enhancedService.labRate = labMatch.rate;
             
+            // Log whether this was a database match or fallback
+            if (labMatch.reasoning && labMatch.reasoning.includes('database')) {
+              console.log('[SERVICE_ENHANCEMENT] Using database rates for lab service');
+            } else {
+              console.log('[SERVICE_ENHANCEMENT] Using fallback rates for lab service:', labMatch.reasoning);
+            }
+            
             // Calculate potential savings
             enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
           }
@@ -1000,6 +1007,13 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.codeMatchMethod = drugMatch.matchMethod;
             enhancedService.pricingModel = 'ASP';
             enhancedService.reimbursementType = 'asp';
+            
+            // Log whether this was a database match or fallback
+            if (drugMatch.reasoning && drugMatch.reasoning.includes('database')) {
+              console.log('[SERVICE_ENHANCEMENT] Using database rates for drug service');
+            } else {
+              console.log('[SERVICE_ENHANCEMENT] Using fallback rates for drug service:', drugMatch.reasoning);
+            }
             
             // Set both original ASP price and ASP+6%
             if (drugMatch.price) {

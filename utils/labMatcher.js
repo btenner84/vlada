@@ -32,6 +32,26 @@ export async function matchServiceToLab(serviceDescription, additionalContext = 
     const extractedCodeFromDesc = extractedCode || extractCodeFromDescription(serviceDescription);
     if (extractedCodeFromDesc) {
       console.log(`[LAB_MATCHER] Extracted code from service: ${extractedCodeFromDesc}`);
+      
+      // Look up the extracted code directly first (prioritize database)
+      const directMatch = await lookupLabCode(extractedCodeFromDesc);
+      if (directMatch) {
+        console.log(`[LAB_MATCHER] Found direct match for extracted code ${extractedCodeFromDesc}`);
+        
+        if (directMatch.reasoning.includes('database')) {
+          console.log('[LAB_MATCHER] Using database rate for direct match');
+        } else {
+          console.log('[LAB_MATCHER] Using fallback rate for direct match:', directMatch.reasoning);
+        }
+        
+        return {
+          matched: true,
+          ...directMatch,
+          confidence: 0.95,
+          reasoning: `Direct match by extracted code ${extractedCodeFromDesc}: ${directMatch.reasoning}`,
+          matchMethod: 'extracted_code'
+        };
+      }
     }
     
     // STEP 1: Use OpenAI as the first line of defense
@@ -216,6 +236,48 @@ async function lookupLabCode(labCode) {
   try {
     console.log(`[LAB_MATCHER] Looking up lab code: ${labCode}`);
     
+    // Normalize the code to 5 digits
+    const normalizedCode = labCode.padStart(5, '0');
+    console.log(`[LAB_MATCHER] Normalized code: ${normalizedCode}`);
+    
+    // Try database lookup first
+    try {
+      if (db) {
+        console.log(`[LAB_MATCHER] Checking for lab code ${normalizedCode} in database first`);
+        
+        // First try exact match
+        let docRef = await db.collection('labCodes').doc(normalizedCode).get();
+        
+        // If no exact match, try without leading zeros
+        if (!docRef.exists) {
+          const trimmedCode = normalizedCode.replace(/^0+/, '');
+          console.log(`[LAB_MATCHER] No exact match found, trying without leading zeros: ${trimmedCode}`);
+          docRef = await db.collection('labCodes').doc(trimmedCode).get();
+        }
+        
+        if (docRef.exists) {
+          const data = docRef.data();
+          console.log('[LAB_MATCHER] Found lab code data in database:', data);
+          
+          // Ensure rate is a number
+          const rate = typeof data.rate === 'string' ? parseFloat(data.rate) : data.rate;
+          
+          return {
+            labCode: data.code,
+            description: data.description,
+            detailedDescription: data.detailedDescription || data.description,
+            rate: rate || null,
+            reasoning: 'Direct code match from Clinical Laboratory Fee Schedule database'
+          };
+        } else {
+          console.log(`[LAB_MATCHER] Lab code ${normalizedCode} not found in database`);
+        }
+      }
+    } catch (dbError) {
+      console.error('[LAB_MATCHER] Database lookup error:', dbError);
+    }
+    
+    // Fall back to common lab codes if not found in database
     // Handle common lab codes directly
     const commonLabCodes = {
       '80053': { code: '80053', description: 'Comprehensive Metabolic Panel', rate: 10.56 },
@@ -227,48 +289,18 @@ async function lookupLabCode(labCode) {
     // Check if it's a common lab code
     if (commonLabCodes[labCode]) {
       const data = commonLabCodes[labCode];
-      console.log(`[LAB_MATCHER] Found common lab code: ${labCode}`, data);
+      console.log(`[LAB_MATCHER] Found fallback rate in common lab codes: ${labCode}`, data);
       return {
         labCode: data.code,
         description: data.description,
         detailedDescription: data.description,
         rate: data.rate,
-        reasoning: 'Direct match from common lab codes'
+        reasoning: 'Fallback match from common lab codes (not found in database)'
       };
     }
     
-    // Normalize the code to 5 digits
-    const normalizedCode = labCode.padStart(5, '0');
-    console.log(`[LAB_MATCHER] Normalized code: ${normalizedCode}`);
-    
-    // First try exact match
-    let docRef = await db.collection('labCodes').doc(normalizedCode).get();
-    
-    // If no exact match, try without leading zeros
-    if (!docRef.exists) {
-      const trimmedCode = normalizedCode.replace(/^0+/, '');
-      console.log(`[LAB_MATCHER] No exact match found, trying without leading zeros: ${trimmedCode}`);
-      docRef = await db.collection('labCodes').doc(trimmedCode).get();
-    }
-    
-    if (!docRef.exists) {
-      console.log(`[LAB_MATCHER] No lab code found for: ${labCode}`);
-      return null;
-    }
-    
-    const data = docRef.data();
-    console.log('[LAB_MATCHER] Found lab code data:', data);
-    
-    // Ensure rate is a number
-    const rate = typeof data.rate === 'string' ? parseFloat(data.rate) : data.rate;
-    
-    return {
-      labCode: data.code,
-      description: data.description,
-      detailedDescription: data.detailedDescription || data.description,
-      rate: rate || null,
-      reasoning: 'Direct code match from Clinical Laboratory Fee Schedule'
-    };
+    console.log(`[LAB_MATCHER] No lab code found for: ${labCode}`);
+    return null;
   } catch (error) {
     console.error('[LAB_MATCHER] Error looking up lab code:', error);
     return null;

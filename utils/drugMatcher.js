@@ -54,7 +54,7 @@ const drugNameVariations = {
  */
 const matchServiceToDrug = async (service, additionalContext = {}) => {
   try {
-    console.log('[DRUG_MATCHER] Starting drug matching for:', service.description);
+    console.log(`[DRUG_MATCHER] Starting drug code matching for: "${service.description}"`);
     
     if (!service.description) {
       console.log('[DRUG_MATCHER] No service description provided');
@@ -63,11 +63,38 @@ const matchServiceToDrug = async (service, additionalContext = {}) => {
         reasoning: 'No service description provided'
       };
     }
-
+    
     // Extract the code if available (we'll use this for confirmation later)
     const extractedCode = service.code || extractCodeFromDescription(service.description);
     if (extractedCode) {
       console.log(`[DRUG_MATCHER] Extracted code from service: ${extractedCode}`);
+      
+      // Look up the extracted code directly in database first
+      const directMatch = await lookupDrugCode(extractedCode);
+      if (directMatch) {
+        console.log(`[DRUG_MATCHER] Found direct match for extracted code ${extractedCode}`);
+        
+        if (directMatch.reasoning && directMatch.reasoning.includes('database')) {
+          console.log('[DRUG_MATCHER] Using database rate for direct match');
+        } else if (directMatch.source === 'firestore') {
+          console.log('[DRUG_MATCHER] Using database rate for direct match (from Firestore)');
+          directMatch.reasoning = 'Direct match from drug database';
+        } else {
+          console.log('[DRUG_MATCHER] Using fallback rate for direct match (from static data)');
+          directMatch.reasoning = 'Direct match from fallback drug data';
+        }
+        
+        return {
+          matched: true,
+          code: directMatch.code,
+          description: directMatch.description,
+          price: directMatch.price || null,
+          dosage: directMatch.dosage || null,
+          confidence: 0.95,
+          reasoning: directMatch.reasoning || 'Direct match by code',
+          matchMethod: 'extracted_code'
+        };
+      }
     }
     
     // Parse dosage from service description (for price adjustment later)
@@ -269,34 +296,51 @@ async function lookupDrugCode(code) {
   try {
     console.log('[DRUG_MATCHER] Looking up drug code:', code);
     
-    // Check common drug codes first
-    if (commonDrugCodes[code]) {
-      const data = commonDrugCodes[code];
-      console.log('[DRUG_MATCHER] Found common drug code:', code, data);
-      return data;
-    }
-    
-    // Check ASP pricing map
-    if (aspPricingMap.has(code)) {
-      const data = aspPricingMap.get(code);
-      console.log('[DRUG_MATCHER] Found drug code in ASP pricing map:', code, data);
-      return data;
-    }
-    
-    // Try to find in Firestore if available
+    // Try to find in Firestore first if available
+    let databaseMatch = null;
     try {
       if (adminDb) {
+        console.log('[DRUG_MATCHER] Checking for drug code in Firestore database first');
+        
         const docRef = adminDb.collection('drugCodes').doc(code);
         const doc = await docRef.get();
         
         if (doc.exists) {
           const data = doc.data();
-          console.log('[DRUG_MATCHER] Found drug data in Firestore:', data);
-          return data;
+          console.log('[DRUG_MATCHER] Found drug data in Firestore database:', data);
+          return {
+            ...data,
+            source: 'firestore',
+            reasoning: 'Direct match from drug database'
+          }; // Return database match immediately
+        } else {
+          console.log('[DRUG_MATCHER] Drug code not found in Firestore database:', code);
         }
       }
     } catch (firestoreError) {
-      console.error('[DRUG_MATCHER] Firestore error, using local data only:', firestoreError.message);
+      console.error('[DRUG_MATCHER] Firestore error:', firestoreError.message);
+    }
+    
+    // Fall back to ASP pricing map if not found in database
+    if (aspPricingMap.has(code)) {
+      const data = aspPricingMap.get(code);
+      console.log('[DRUG_MATCHER] Found drug code in ASP pricing map (fallback):', code, data);
+      return {
+        ...data,
+        source: 'asp_pricing_map',
+        reasoning: 'Fallback match from ASP pricing data'
+      };
+    }
+    
+    // Finally, check common drug codes as last resort
+    if (commonDrugCodes[code]) {
+      const data = commonDrugCodes[code];
+      console.log('[DRUG_MATCHER] Found drug code in common drug codes (fallback):', code, data);
+      return {
+        ...data,
+        source: 'common_drug_codes',
+        reasoning: 'Fallback match from common drug codes'
+      };
     }
     
     console.log('[DRUG_MATCHER] No drug code found for:', code);
