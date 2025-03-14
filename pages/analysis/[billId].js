@@ -1263,15 +1263,15 @@ export default function BillAnalysis() {
                                       onClick={() => setExpandedReasoningId(expandedReasoningId === index ? null : index)}
                                       style={{
                                         display: "flex",
-                                        alignItems: "center",
+                                  alignItems: "center",
                                         gap: "0.5rem",
-                                        background: "rgba(59, 130, 246, 0.1)",
+                                  background: "rgba(59, 130, 246, 0.1)",
                                         border: "1px solid rgba(59, 130, 246, 0.2)",
-                                        borderRadius: "0.5rem",
+                                  borderRadius: "0.5rem",
                                         padding: "0.4rem 0.8rem",
-                                        fontSize: "0.8rem",
-                                        fontWeight: "500",
-                                        color: "#3B82F6",
+                                    fontSize: "0.8rem",
+                                    fontWeight: "500",
+                                    color: "#3B82F6",
                                         cursor: "pointer",
                                         width: "fit-content",
                                         transition: "all 0.2s ease"
@@ -1305,29 +1305,29 @@ export default function BillAnalysis() {
                                 gap: "0.5rem",
                                 marginTop: "0.5rem"
                               }}>
-                                {/* Display service category if available */}
-                                {service.category && (
-                                  <div style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    background: "rgba(16, 185, 129, 0.1)",
-                                    borderRadius: "0.5rem",
-                                    padding: "0.3rem 0.6rem",
-                                    width: "fit-content"
+                              {/* Display service category if available */}
+                              {service.category && (
+                                <div style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  background: "rgba(16, 185, 129, 0.1)",
+                                  borderRadius: "0.5rem",
+                                  padding: "0.3rem 0.6rem",
+                                  width: "fit-content"
+                                }}>
+                                  <span style={{
+                                    fontSize: "0.8rem",
+                                    fontWeight: "500",
+                                    color: "#10B981"
                                   }}>
-                                    <span style={{
-                                      fontSize: "0.8rem",
-                                      fontWeight: "500",
-                                      color: "#10B981"
-                                    }}>
-                                      CATEGORY: {service.category}
-                                    </span>
-                                  </div>
-                                )}
-                                
+                                    CATEGORY: {service.category}
+                                  </span>
+                                </div>
+                              )}
+                              
                                 {/* CODE display */}
                                 {service.code && (
-                                  <div style={{
+                                <div style={{
                                     display: "inline-flex",
                                     alignItems: "center",
                                     background: "rgba(59, 130, 246, 0.1)",
@@ -1336,15 +1336,15 @@ export default function BillAnalysis() {
                                     width: "fit-content"
                                   }}>
                                     <span style={{
-                                      fontSize: "0.8rem",
+                                  fontSize: "0.8rem",
                                       fontWeight: "500",
                                       color: "#3B82F6",
                                       fontFamily: "monospace"
                                     }}>
                                       CODE: {service.code}
                                     </span>
-                                  </div>
-                                )}
+                                </div>
+                              )}
                               </div>
                               
                               {/* Display code description if available and different from service description */}

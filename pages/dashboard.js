@@ -29,6 +29,8 @@ export default function Dashboard() {
   const [showAllUploads, setShowAllUploads] = useState(false);
   const [showAllAnalyzedBills, setShowAllAnalyzedBills] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState(Date.now());
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragCounter, setDragCounter] = useState(0);
 
   const fetchUploads = useCallback(async () => {
     if (!user) return;
@@ -468,24 +470,18 @@ export default function Dashboard() {
       });
       console.log('Updated user profile');
 
-      // Update UI
-      console.log('Refreshing bills list...');
-      await Promise.all([
-        fetchUploads(),
-        fetchAnalyzedBills()
-      ]);
-      console.log('Successfully refreshed bills list');
-      
       // Reset states
       setSelectedFile(null);
       setFileName('');
       setShowNameDialog(false);
-      alert('File uploaded successfully!');
+      
+      // Instead of showing an alert, navigate directly to analysis page
+      console.log('Redirecting to analysis page...');
+      await router.push(`/analysis/${billDocRef.id}`);
 
     } catch (error) {
       console.error('Upload error:', error);
       alert('Error uploading file: ' + error.message);
-    } finally {
       setUploadingFile(false);
     }
   };
@@ -628,6 +624,45 @@ export default function Dashboard() {
       setNewFileName(currentName);
     }
   };
+
+  // Add these handlers for drag and drop functionality
+  const handleDragIn = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter(prev => prev + 1);
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleDragOut = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragCounter(prev => prev - 1);
+    if (dragCounter === 1) {
+      setIsDragging(false);
+    }
+  }, [dragCounter]);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    setDragCounter(0);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      setSelectedFile(file);
+      setFileName(file.name);
+      setShowNameDialog(true);
+      e.dataTransfer.clearData();
+    }
+  }, []);
 
   // Add loading screen component
   if (isAnalyzing) {
@@ -777,12 +812,12 @@ export default function Dashboard() {
             <ProcessStep 
               number="1"
               title="Upload Your Bills"
-              description="Securely upload your medical bills in any format (PDF, images, or text)"
+              description="Securely upload your medical bills in any format (PDF, images, or text) and our AI automatically starts analyzing"
             />
             <ProcessStep 
               number="2"
-              title="AI Analysis"
-              description="Our AI analyzes charges, compares with fair market rates, and identifies potential errors"
+              title="Review Analysis"
+              description="View the AI analysis of charges, fair market rates, and potential errors in your bills"
             />
             <ProcessStep 
               number="3"
@@ -799,15 +834,17 @@ export default function Dashboard() {
           gap: isMobile ? "1.25rem" : "2rem"
         }}>
           {/* Left Panel - Bill Upload */}
-          <div style={{
-            background: theme.colors.bgSecondary,
-            borderRadius: theme.borderRadius.lg,
-            padding: isMobile ? "1.5rem" : "2rem",
-            border: "1px solid rgba(255, 255, 255, 0.1)",
-            height: "100%",
-            position: isMobile ? "relative" : "sticky",
-            top: isMobile ? "0" : "100px"
-          }}>
+          <div
+            id="uploads"
+            style={{
+              background: theme.colors.bgSecondary,
+              borderRadius: theme.borderRadius.lg,
+              padding: isMobile ? "1.5rem" : "2rem",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              height: "100%",
+              position: isMobile ? "relative" : "sticky",
+              top: isMobile ? "0" : "100px"
+            }}>
             <h2 style={{
               fontSize: isMobile ? "1.3rem" : "1.5rem",
               fontWeight: "700",
@@ -817,9 +854,16 @@ export default function Dashboard() {
               WebkitTextFillColor: "transparent"
             }}>Upload Bills 📄</h2>
 
-            <div style={{
-              marginBottom: "2rem"
-            }}>
+            <div 
+              onDragEnter={handleDragIn}
+              onDragLeave={handleDragOut}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              style={{
+                marginBottom: "2rem",
+                position: "relative"
+              }}
+            >
               <input
                 type="file"
                 id="fileInput"
@@ -828,63 +872,271 @@ export default function Dashboard() {
                 style={{ display: 'none' }}
               />
 
-              <label htmlFor="fileInput" style={{
-                display: "block",
-                width: "100%",
-                padding: "1rem",
-                background: theme.colors.gradientPrimary,
-                borderRadius: theme.borderRadius.md,
-                color: theme.colors.textPrimary,
-                textAlign: "center",
-                cursor: "pointer",
-                marginTop: "4rem",
-                marginBottom: "4rem",
-                fontSize: "1rem",
-                fontWeight: "600",
-                minHeight: "48px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}>
-                <span style={{
+              <label 
+                htmlFor="fileInput" 
+                style={{
+                  padding: "3rem 2rem",
+                  background: isDragging 
+                    ? "rgba(30, 41, 59, 0.8)" 
+                    : "rgba(30, 41, 59, 0.5)",
+                  border: isDragging 
+                    ? `2px dashed ${theme.colors.primary}` 
+                    : "1px solid rgba(255, 255, 255, 0.08)",
+                  borderRadius: theme.borderRadius.lg,
+                  color: theme.colors.textPrimary,
+                  textAlign: "center",
+                  cursor: "pointer",
+                  fontSize: "1rem",
+                  fontWeight: "600",
+                  minHeight: "220px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "1.75rem",
+                  transition: "all 0.3s ease",
+                  boxShadow: isDragging 
+                    ? "0 0 30px rgba(80, 70, 229, 0.2)" 
+                    : "0 4px 6px rgba(0, 0, 0, 0.1)",
+                  backdropFilter: "blur(10px)",
+                  position: "relative",
+                  overflow: "hidden"
+                }}
+              >
+                {/* Blue accent line at top */}
+                <div style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: "4px",
+                  background: "linear-gradient(90deg, #3B82F6 0%, #60A5FA 100%)",
+                  opacity: 0.8,
+                  zIndex: 2
+                }} />
+                
+                {/* Subtle background gradient effect */}
+                <div style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: "radial-gradient(circle at center, rgba(80, 70, 229, 0.05) 0%, rgba(30, 41, 59, 0) 70%)",
+                  zIndex: 0
+                }} />
+                
+                {/* Brain icon container with enhanced styling */}
+                <div style={{
+                  width: "90px",
+                  height: "90px",
+                  background: "rgba(22, 31, 46, 0.7)",
+                  borderRadius: "50%",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: "0.5rem"
+                  fontSize: "2.5rem",
+                  animation: isDragging ? "pulseAndRotate 2s infinite" : "float 4s ease-in-out infinite",
+                  position: "relative",
+                  zIndex: 1,
+                  boxShadow: isDragging 
+                    ? "0 0 20px rgba(80, 70, 229, 0.4)" 
+                    : "0 4px 12px rgba(0, 0, 0, 0.2)"
                 }}>
-                  Select Bill to Upload
-                  <span style={{ fontSize: "1.2rem" }}>📄</span>
-                </span>
+                  {isDragging ? "📄" : "🧠"}
+                  
+                  {/* Pulsing ring effect */}
+                  <div className="pulse-ring"></div>
+                </div>
+                
+                <div style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "0.75rem",
+                  zIndex: 1
+                }}>
+                  <div style={{
+                    fontSize: "1.4rem",
+                    fontWeight: "700",
+                    background: isDragging 
+                      ? "linear-gradient(135deg, #60A5FA 0%, #7C3AED 100%)" 
+                      : theme.colors.gradientPrimary,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    transition: "all 0.3s ease"
+                  }}>
+                    {isDragging ? "Drop File Here" : "Upload Bill for Analysis"}
+                  </div>
+                  <div style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: "1rem",
+                    maxWidth: "220px",
+                    lineHeight: 1.5
+                  }}>
+                    {isDragging 
+                      ? "Release to upload your file" 
+                      : "Drag & drop or click to select"}
+                  </div>
+                  
+                  {/* File type indicators with icons */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    marginTop: "0.75rem",
+                    color: theme.colors.textSecondary,
+                    fontSize: "0.85rem",
+                    opacity: 0.8,
+                    padding: "0.5rem 1rem",
+                    background: "rgba(0, 0, 0, 0.2)",
+                    borderRadius: "20px",
+                    backdropFilter: "blur(4px)"
+                  }}>
+                    <span style={{ fontSize: "0.9rem" }}>📄</span> PDF, JPG, PNG, DOC files
+                  </div>
+                </div>
+                
+                <style jsx>{`
+                  @keyframes float {
+                    0% { transform: translateY(0px); }
+                    50% { transform: translateY(-10px); }
+                    100% { transform: translateY(0px); }
+                  }
+                  
+                  @keyframes pulseAndRotate {
+                    0% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0 0 rgba(80, 70, 229, 0.4); }
+                    50% { transform: scale(1.1) rotate(5deg); box-shadow: 0 0 0 10px rgba(80, 70, 229, 0); }
+                    100% { transform: scale(1) rotate(0deg); box-shadow: 0 0 0 0 rgba(80, 70, 229, 0); }
+                  }
+                  
+                  .pulse-ring {
+                    position: absolute;
+                    width: 100%;
+                    height: 100%;
+                    border-radius: 50%;
+                    animation: pulse 2s ease-out infinite;
+                    border: 2px solid rgba(80, 70, 229, 0.4);
+                    opacity: 0.3;
+                  }
+                  
+                  @keyframes pulse {
+                    0% { transform: scale(0.9); opacity: 0.6; }
+                    70% { transform: scale(1.3); opacity: 0; }
+                    100% { transform: scale(0.9); opacity: 0; }
+                  }
+                  
+                  label:hover {
+                    transform: translateY(-4px);
+                    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.2);
+                  }
+                `}</style>
               </label>
             </div>
 
             {/* File Name Dialog */}
             {showNameDialog && (
               <div style={{
-                marginTop: "-1rem",
+                marginTop: "1.5rem",
                 marginBottom: "2rem",
-                padding: "1rem",
-                background: "rgba(255, 255, 255, 0.05)",
-                borderRadius: theme.borderRadius.md
+                padding: "1.5rem",
+                background: "rgba(30, 41, 59, 0.5)",
+                backdropFilter: "blur(10px)",
+                borderRadius: theme.borderRadius.lg,
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                animation: "fadeInUp 0.3s forwards",
+                position: "relative",
+                overflow: "hidden"
               }}>
+                {/* Blue accent line at top */}
+                <div style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: "4px",
+                  background: "linear-gradient(90deg, #3B82F6 0%, #60A5FA 100%)",
+                  opacity: 0.8,
+                  zIndex: 2
+                }} />
+                
+                <div style={{
+                  marginBottom: "1.25rem",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.75rem"
+                }}>
+                  <div style={{
+                    width: "38px",
+                    height: "38px",
+                    borderRadius: "50%",
+                    background: "rgba(80, 70, 229, 0.1)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "1.1rem"
+                  }}>
+                    📝
+                  </div>
+                  <div style={{
+                    fontSize: "1.1rem",
+                    fontWeight: "600",
+                    background: theme.colors.gradientPrimary,
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent"
+                  }}>
+                    Name Your Bill
+                  </div>
+                </div>
+                
                 <input
                   type="text"
                   value={fileName}
                   onChange={(e) => setFileName(e.target.value)}
-                  placeholder="Enter bill name"
+                  placeholder="Enter a descriptive name for this bill"
                   style={{
                     width: "100%",
-                    padding: "1rem",
-                    background: "rgba(255, 255, 255, 0.05)",
+                    padding: "1rem 1.25rem",
+                    background: "rgba(0, 0, 0, 0.2)",
                     border: "1px solid rgba(255, 255, 255, 0.1)",
-                    borderRadius: theme.borderRadius.md,
+                    borderRadius: theme.borderRadius.lg,
                     color: theme.colors.textPrimary,
-                    marginBottom: "1rem"
+                    marginBottom: "1.25rem",
+                    fontSize: "0.95rem",
+                    fontWeight: "500",
+                    transition: "all 0.2s ease",
+                    outline: "none"
+                  }}
+                  onFocus={(e) => {
+                    e.target.style.borderColor = "rgba(80, 70, 229, 0.4)";
+                    e.target.style.boxShadow = "0 0 0 2px rgba(80, 70, 229, 0.1)";
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = "rgba(255, 255, 255, 0.1)";
+                    e.target.style.boxShadow = "none";
                   }}
                 />
+                <p style={{
+                  color: theme.colors.textSecondary, 
+                  fontSize: "0.9rem", 
+                  marginBottom: "1.5rem",
+                  textAlign: "center",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.5rem"
+                }}>
+                  <span style={{ 
+                    fontSize: "1rem", 
+                    opacity: 0.8,
+                    color: "#60A5FA"
+                  }}>ℹ️</span>
+                  Your bill will be automatically analyzed after upload
+                </p>
                 <div style={{
                   display: "flex",
-                  gap: "0.5rem"
+                  gap: "0.75rem"
                 }}>
                   <button
                     onClick={handleUpload}
@@ -894,7 +1146,7 @@ export default function Dashboard() {
                       padding: "1rem",
                       background: theme.colors.gradientPrimary,
                       border: "none",
-                      borderRadius: theme.borderRadius.md,
+                      borderRadius: theme.borderRadius.lg,
                       color: theme.colors.textPrimary,
                       fontSize: "1rem",
                       fontWeight: "600",
@@ -903,13 +1155,25 @@ export default function Dashboard() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      gap: "0.5rem"
+                      gap: "0.5rem",
+                      transition: "all 0.2s ease",
+                      boxShadow: "0 4px 12px rgba(80, 70, 229, 0.2)"
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!uploadingFile) {
+                        e.target.style.transform = "translateY(-2px)";
+                        e.target.style.boxShadow = "0 6px 15px rgba(80, 70, 229, 0.3)";
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.transform = "translateY(0)";
+                      e.target.style.boxShadow = "0 4px 12px rgba(80, 70, 229, 0.2)";
                     }}
                   >
                     <span>
-                      {uploadingFile ? "Uploading..." : "Upload Bill"}
+                      {uploadingFile ? "Uploading..." : "Upload & Analyze Bill"}
                     </span>
-                    <span style={{ fontSize: "1.2rem" }}>{uploadingFile ? "🔄" : "⬆️"}</span>
+                    <span style={{ fontSize: "1.2rem" }}>{uploadingFile ? "🔄" : "📊"}</span>
                   </button>
                   <button
                     onClick={() => {
@@ -919,254 +1183,42 @@ export default function Dashboard() {
                     }}
                     style={{
                       padding: "1rem",
-                      background: "transparent",
-                      border: `1px solid ${theme.colors.primary}`,
-                      borderRadius: theme.borderRadius.md,
-                      color: theme.colors.primary,
+                      background: "rgba(0, 0, 0, 0.2)",
+                      border: `1px solid rgba(255, 255, 255, 0.1)`,
+                      borderRadius: theme.borderRadius.lg,
+                      color: theme.colors.textSecondary,
                       cursor: "pointer",
                       fontSize: "1rem",
-                      fontWeight: "600"
+                      fontWeight: "600",
+                      transition: "all 0.2s ease"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.background = "rgba(0, 0, 0, 0.3)";
+                      e.target.style.color = theme.colors.textPrimary;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.background = "rgba(0, 0, 0, 0.2)";
+                      e.target.style.color = theme.colors.textSecondary;
                     }}
                   >
                     Cancel
                   </button>
                 </div>
+                
+                <style jsx>{`
+                  @keyframes fadeInUp {
+                    from {
+                      opacity: 0;
+                      transform: translateY(10px);
+                    }
+                    to {
+                      opacity: 1;
+                      transform: translateY(0);
+                    }
+                  }
+                `}</style>
               </div>
             )}
-
-            {/* Recent Uploads */}
-            <div style={{
-              marginTop: "2rem",
-              borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-              paddingTop: "1.5rem"
-            }}>
-              <h3 style={{
-                fontSize: isMobile ? "1rem" : "1.1rem",
-                fontWeight: "600",
-                marginBottom: isMobile ? "0.75rem" : "1rem",
-                color: theme.colors.textPrimary
-              }}>Recent Uploads</h3>
-
-              {recentUploads.length > 0 ? (
-                <>
-                  <div style={{ display: "grid", gap: isMobile ? "0.75rem" : "1rem" }}>
-                    {(showAllUploads ? recentUploads : recentUploads.slice(0, 5)).map((upload, index) => (
-                      <div
-                        key={index}
-                        style={{
-                          background: "rgba(255, 255, 255, 0.05)",
-                          borderRadius: theme.borderRadius.md,
-                          padding: isMobile ? "0.75rem" : "1rem",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
-                          display: "flex",
-                          flexDirection: isMobile ? "column" : "row",
-                          justifyContent: "space-between",
-                          alignItems: isMobile ? "flex-start" : "center",
-                          gap: isMobile ? "0.75rem" : "0"
-                        }}
-                      >
-                        <div style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.25rem",
-                          flex: 1,
-                          minWidth: 0 // Enable text truncation
-                        }}>
-                          {editingFileName === upload.id ? (
-                            <input
-                              type="text"
-                              value={newFileName}
-                              onChange={(e) => setNewFileName(e.target.value)}
-                              style={{
-                                background: "rgba(255, 255, 255, 0.1)",
-                                border: "1px solid rgba(255, 255, 255, 0.2)",
-                                borderRadius: theme.borderRadius.sm,
-                                color: theme.colors.textPrimary,
-                                padding: "0.25rem 0.5rem",
-                                fontSize: "0.95rem",
-                                width: "100%"
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  handleEditFileName(upload.id, upload.fileName);
-                                } else if (e.key === 'Escape') {
-                                  setEditingFileName(null);
-                                  setNewFileName('');
-                                }
-                              }}
-                              autoFocus
-                            />
-                          ) : (
-                            <div style={{
-                              fontSize: "0.95rem",
-                              fontWeight: "500",
-                              color: theme.colors.textPrimary,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.5rem"
-                            }}>
-                              {upload.fileName}
-                              <button
-                                onClick={() => handleEditFileName(upload.id, upload.fileName)}
-                                style={{
-                                  background: "transparent",
-                                  border: "none",
-                                  padding: "0.25rem",
-                                  cursor: "pointer",
-                                  opacity: 0.7,
-                                  transition: "opacity 0.2s ease"
-                                }}
-                                onMouseEnter={(e) => e.target.style.opacity = 1}
-                                onMouseLeave={(e) => e.target.style.opacity = 0.7}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-                                </svg>
-                              </button>
-                            </div>
-                          )}
-                          <div style={{
-                            fontSize: "0.8rem",
-                            color: theme.colors.textSecondary
-                          }}>
-                            {new Date(upload.uploadedAt).toLocaleDateString()}
-                          </div>
-                        </div>
-                        <div style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          alignItems: "center",
-                          flexShrink: 0, // Prevent button from shrinking
-                          width: isMobile ? "100%" : "auto",
-                          justifyContent: isMobile ? "space-between" : "flex-end"
-                        }}>
-                          <a
-                            href={upload.fileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              background: "rgba(31, 41, 55, 0.7)",
-                              border: "1px solid rgba(255, 255, 255, 0.2)",
-                              padding: "0.5rem",
-                              borderRadius: theme.borderRadius.md,
-                              color: theme.colors.textPrimary,
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              transition: "all 0.2s ease",
-                              width: isMobile ? "40px" : "32px",
-                              height: isMobile ? "40px" : "32px",
-                              backdropFilter: "blur(8px)",
-                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-                              flex: isMobile ? "1" : "0"
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
-                              e.target.style.borderColor = "rgba(255, 255, 255, 0.3)";
-                              e.target.style.transform = "scale(1.05)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
-                              e.target.style.borderColor = "rgba(255, 255, 255, 0.2)";
-                              e.target.style.transform = "scale(1)";
-                            }}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                              <polyline points="15 3 21 3 21 9"/>
-                              <line x1="10" y1="14" x2="21" y2="3"/>
-                            </svg>
-                          </a>
-                          <button
-                            onClick={() => handleDelete(upload.id, upload.storagePath)}
-                            disabled={deletingFile}
-                            style={{
-                              background: "rgba(31, 41, 55, 0.7)",
-                              border: "1px solid rgba(220, 38, 38, 0.3)",
-                              color: "#DC2626",
-                              cursor: deletingFile ? "not-allowed" : "pointer",
-                              opacity: deletingFile ? 0.5 : 1,
-                              padding: "0.5rem",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              borderRadius: theme.borderRadius.md,
-                              transition: "all 0.2s ease",
-                              width: isMobile ? "40px" : "32px",
-                              height: isMobile ? "40px" : "32px",
-                              backdropFilter: "blur(8px)",
-                              boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
-                              flex: isMobile ? "1" : "0"
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.8)";
-                              e.target.style.borderColor = "rgba(220, 38, 38, 0.5)";
-                              e.target.style.transform = "scale(1.05)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.background = "rgba(31, 41, 55, 0.7)";
-                              e.target.style.borderColor = "rgba(220, 38, 38, 0.3)";
-                              e.target.style.transform = "scale(1)";
-                            }}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M3 6h18"/>
-                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  {recentUploads.length > 5 && (
-                    <div style={{ 
-                      textAlign: "center", 
-                      marginTop: "1rem",
-                    }}>
-                      <button 
-                        onClick={() => setShowAllUploads(!showAllUploads)} 
-                        style={{
-                          background: "transparent",
-                          border: `1px solid ${theme.colors.primary}`,
-                          borderRadius: theme.borderRadius.md,
-                          color: theme.colors.primary,
-                          padding: "0.75rem 1.5rem",
-                          cursor: "pointer",
-                          fontSize: "0.9rem",
-                          fontWeight: "600",
-                          transition: "all 0.2s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.target.style.background = "rgba(80, 70, 229, 0.1)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.target.style.background = "transparent";
-                        }}
-                      >
-                        {showAllUploads ? "Show Less" : "See More"}
-                      </button>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div style={{
-                  color: theme.colors.textSecondary,
-                  fontSize: "0.9rem",
-                  textAlign: "center",
-                  padding: "1.5rem 0",
-                  borderRadius: theme.borderRadius.sm,
-                  background: "rgba(255, 255, 255, 0.03)",
-                  border: "1px solid rgba(255, 255, 255, 0.05)"
-                }}>
-                  <p style={{ marginBottom: "0.5rem" }}>No bills uploaded yet</p>
-                  <p style={{ fontSize: "0.8rem", opacity: 0.7 }}>
-                    Select a bill above to start your first upload
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Middle Panel - AI Analysis */}
@@ -1187,296 +1239,245 @@ export default function Dashboard() {
               background: theme.colors.gradientSecondary,
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent"
-            }}>AI Analysis 🤖</h2>
+            }}>AI Analysis 🧠</h2>
 
+            {/* Analyzed Bills List - Now with more prominence */}
             <div style={{
               marginBottom: isMobile ? "1.5rem" : "2rem"
             }}>
-              <select
-                value={selectedBill}
-                onChange={(e) => setSelectedBill(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "1rem",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px solid rgba(255, 255, 255, 0.1)",
-                  borderRadius: theme.borderRadius.md,
-                  color: theme.colors.textPrimary,
-                  marginBottom: "1rem"
-                }}
-              >
-                <option value="">Select a bill to analyze</option>
-                {recentUploads.map((upload, index) => (
-                  <option key={index} value={upload.id}>
-                    {upload.fileName}
-                  </option>
-                ))}
-              </select>
-
-              <button
-                onClick={handleAnalyze}
-                disabled={!selectedBill}
-                style={{
-                  width: "100%",
-                  padding: isMobile ? "0.875rem" : "1rem",
-                  background: theme.colors.gradientPrimary,
-                  border: "none",
-                  borderRadius: theme.borderRadius.md,
-                  color: theme.colors.textPrimary,
-                  fontSize: isMobile ? "0.95rem" : "1rem",
-                  fontWeight: "600",
-                  cursor: selectedBill ? "pointer" : "not-allowed",
-                  opacity: selectedBill ? 1 : 0.7,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.5rem",
-                  marginBottom: isMobile ? "1.5rem" : "2rem"
-                }}
-              >
-                Analyze Bill ⚡
-              </button>
-
-              {/* Analyzed Bills List */}
-              <div style={{
-                marginTop: isMobile ? "1.5rem" : "2rem",
-                borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-                paddingTop: isMobile ? "1.25rem" : "1.5rem"
+              <h3 style={{
+                fontSize: isMobile ? "1rem" : "1.2rem",
+                fontWeight: "700",
+                marginBottom: isMobile ? "1rem" : "1.5rem",
+                color: theme.colors.textPrimary,
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem"
               }}>
-                <h3 style={{
-                  fontSize: isMobile ? "1rem" : "1.1rem",
-                  fontWeight: "700",
-                  marginBottom: isMobile ? "1rem" : "1.5rem",
-                  color: theme.colors.textPrimary,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem"
-                }}>
-                  <span style={{ 
-                    background: theme.colors.gradientPrimary,
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent"
-                  }}>Analyzed Bills</span>
-                  {analyzedBills.length > 0 && (
-                    <span style={{
-                      fontSize: "0.75rem",
-                      background: "rgba(255, 255, 255, 0.1)",
-                      borderRadius: "999px",
-                      padding: "0.2rem 0.5rem",
-                      color: theme.colors.textSecondary
-                    }}>{analyzedBills.length}</span>
-                  )}
-                </h3>
+                <span style={{ 
+                  background: theme.colors.gradientPrimary,
+                  WebkitBackgroundClip: "text",
+                  WebkitTextFillColor: "transparent"
+                }}>Analyzed Bills</span>
+                {analyzedBills.length > 0 && (
+                  <span style={{
+                    fontSize: "0.75rem",
+                    background: "rgba(255, 255, 255, 0.1)",
+                    borderRadius: "999px",
+                    padding: "0.2rem 0.5rem",
+                    color: theme.colors.textSecondary
+                  }}>{analyzedBills.length}</span>
+                )}
+              </h3>
 
-                {analyzedBills.length > 0 ? (
-                  <>
-                    <div style={{ display: "grid", gap: isMobile ? "0.85rem" : "1.25rem" }}>
-                      {(showAllAnalyzedBills ? analyzedBills : analyzedBills.slice(0, 5)).map((bill, index) => (
-                        <div
-                          key={index}
-                          style={{
-                            background: "rgba(30, 41, 59, 0.5)",
-                            borderRadius: theme.borderRadius.lg,
-                            overflow: "hidden",
-                            border: "1px solid rgba(255, 255, 255, 0.08)",
-                            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
-                            transition: "all 0.3s ease",
-                            position: "relative"
-                          }}
-                        >
-                          {/* Subtle gradient overlay */}
+              {analyzedBills.length > 0 ? (
+                <>
+                  <div style={{ display: "grid", gap: isMobile ? "0.85rem" : "1.25rem" }}>
+                    {(showAllAnalyzedBills ? analyzedBills : analyzedBills.slice(0, 5)).map((bill, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          background: "rgba(30, 41, 59, 0.5)",
+                          borderRadius: theme.borderRadius.lg,
+                          overflow: "hidden",
+                          border: "1px solid rgba(255, 255, 255, 0.08)",
+                          boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                          transition: "all 0.3s ease",
+                          position: "relative"
+                        }}
+                      >
+                        {/* Subtle gradient overlay */}
+                        <div style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: "4px",
+                          background: theme.colors.gradientPrimary,
+                          opacity: 0.8
+                        }} />
+                        
+                        <div style={{
+                          padding: isMobile ? "1rem" : "1.25rem",
+                          display: "flex",
+                          flexDirection: isMobile ? "column" : "row",
+                          justifyContent: "space-between",
+                          alignItems: isMobile ? "flex-start" : "center",
+                          gap: isMobile ? "1rem" : "0.5rem"
+                        }}>
                           <div style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            height: "4px",
-                            background: theme.colors.gradientPrimary,
-                            opacity: 0.8
-                          }} />
-                          
-                          <div style={{
-                            padding: isMobile ? "1rem" : "1.25rem",
                             display: "flex",
-                            flexDirection: isMobile ? "column" : "row",
-                            justifyContent: "space-between",
-                            alignItems: isMobile ? "flex-start" : "center",
-                            gap: isMobile ? "1rem" : "0.5rem"
+                            flexDirection: "column",
+                            gap: "0.35rem",
+                            flex: 1,
+                            minWidth: 0 // Enable text truncation
                           }}>
                             <div style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "0.35rem",
-                              flex: 1,
-                              minWidth: 0 // Enable text truncation
+                              fontSize: "1rem",
+                              fontWeight: "600",
+                              color: theme.colors.textPrimary,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis"
                             }}>
-                              <div style={{
-                                fontSize: "1rem",
-                                fontWeight: "600",
-                                color: theme.colors.textPrimary,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis"
-                              }}>
-                                {bill.fileName}
-                              </div>
-                              <div style={{
-                                fontSize: "0.8rem",
-                                color: theme.colors.textSecondary,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "0.35rem"
-                              }}>
-                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <circle cx="12" cy="12" r="10" />
-                                  <polyline points="12 6 12 12 16 14" />
-                                </svg>
-                                {new Date(bill.analyzedAt).toLocaleDateString()}
-                              </div>
+                              {bill.fileName}
                             </div>
                             <div style={{
+                              fontSize: "0.8rem",
+                              color: theme.colors.textSecondary,
                               display: "flex",
-                              gap: "0.75rem",
                               alignItems: "center",
-                              flexShrink: 0,
-                              width: isMobile ? "100%" : "auto",
-                              justifyContent: isMobile ? "space-between" : "flex-end"
+                              gap: "0.35rem"
                             }}>
-                              <Link
-                                href={`/analysis/${bill.id}`}
-                                style={{
-                                  padding: isMobile ? "0.7rem 1.1rem" : "0.7rem 1.1rem",
-                                  background: "rgba(59, 130, 246, 0.15)",
-                                  color: "#60A5FA",
-                                  borderRadius: theme.borderRadius.md,
-                                  textDecoration: "none",
-                                  fontSize: "0.875rem",
-                                  fontWeight: "600",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: "0.5rem",
-                                  transition: "all 0.2s ease",
-                                  border: "1px solid rgba(59, 130, 246, 0.3)",
-                                  backdropFilter: "blur(8px)",
-                                  boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
-                                  whiteSpace: "nowrap",
-                                  flex: isMobile ? "1" : "0"
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.target.style.background = "rgba(59, 130, 246, 0.25)";
-                                  e.target.style.borderColor = "rgba(59, 130, 246, 0.5)";
-                                  e.target.style.transform = "translateY(-2px)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.target.style.background = "rgba(59, 130, 246, 0.15)";
-                                  e.target.style.borderColor = "rgba(59, 130, 246, 0.3)";
-                                  e.target.style.transform = "translateY(0)";
-                                }}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </svg>
-                                View
-                              </Link>
-                              <button
-                                onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
-                                disabled={deletingFile}
-                                style={{
-                                  background: "rgba(220, 38, 38, 0.1)",
-                                  border: "1px solid rgba(220, 38, 38, 0.2)",
-                                  color: "#F87171",
-                                  cursor: deletingFile ? "not-allowed" : "pointer",
-                                  opacity: deletingFile ? 0.5 : 1,
-                                  padding: "0.7rem",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  borderRadius: theme.borderRadius.md,
-                                  transition: "all 0.2s ease",
-                                  width: isMobile ? "40px" : "40px",
-                                  height: isMobile ? "40px" : "40px",
-                                  backdropFilter: "blur(8px)",
-                                  flexShrink: 0
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.target.style.background = "rgba(220, 38, 38, 0.2)";
-                                  e.target.style.borderColor = "rgba(220, 38, 38, 0.4)";
-                                  e.target.style.transform = "translateY(-2px)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.target.style.background = "rgba(220, 38, 38, 0.1)";
-                                  e.target.style.borderColor = "rgba(220, 38, 38, 0.2)";
-                                  e.target.style.transform = "translateY(0)";
-                                }}
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M3 6h18"/>
-                                  <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                                  <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                                </svg>
-                              </button>
+                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <polyline points="12 6 12 12 16 14" />
+                              </svg>
+                              {new Date(bill.analyzedAt).toLocaleDateString()}
                             </div>
                           </div>
+                          <div style={{
+                            display: "flex",
+                            gap: "0.75rem",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            width: isMobile ? "100%" : "auto",
+                            justifyContent: isMobile ? "space-between" : "flex-end"
+                          }}>
+                            <Link
+                              href={`/analysis/${bill.id}`}
+                              style={{
+                                padding: isMobile ? "0.7rem 1.1rem" : "0.7rem 1.1rem",
+                                background: "rgba(59, 130, 246, 0.15)",
+                                color: "#60A5FA",
+                                borderRadius: theme.borderRadius.md,
+                                textDecoration: "none",
+                                fontSize: "0.875rem",
+                                fontWeight: "600",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "0.5rem",
+                                transition: "all 0.2s ease",
+                                border: "1px solid rgba(59, 130, 246, 0.3)",
+                                backdropFilter: "blur(8px)",
+                                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+                                whiteSpace: "nowrap",
+                                flex: isMobile ? "1" : "0"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = "rgba(59, 130, 246, 0.25)";
+                                e.target.style.borderColor = "rgba(59, 130, 246, 0.5)";
+                                e.target.style.transform = "translateY(-2px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = "rgba(59, 130, 246, 0.15)";
+                                e.target.style.borderColor = "rgba(59, 130, 246, 0.3)";
+                                e.target.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                              View
+                            </Link>
+                            <button
+                              onClick={() => handleDelete(bill.id, `bills/${user.uid}/${bill.timestamp}_${bill.fileName}`)}
+                              disabled={deletingFile}
+                              style={{
+                                background: "rgba(220, 38, 38, 0.1)",
+                                border: "1px solid rgba(220, 38, 38, 0.2)",
+                                color: "#F87171",
+                                cursor: deletingFile ? "not-allowed" : "pointer",
+                                opacity: deletingFile ? 0.5 : 1,
+                                padding: "0.7rem",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                borderRadius: theme.borderRadius.md,
+                                transition: "all 0.2s ease",
+                                width: isMobile ? "40px" : "40px",
+                                height: isMobile ? "40px" : "40px",
+                                backdropFilter: "blur(8px)",
+                                flexShrink: 0
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = "rgba(220, 38, 38, 0.2)";
+                                e.target.style.borderColor = "rgba(220, 38, 38, 0.4)";
+                                e.target.style.transform = "translateY(-2px)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = "rgba(220, 38, 38, 0.1)";
+                                e.target.style.borderColor = "rgba(220, 38, 38, 0.2)";
+                                e.target.style.transform = "translateY(0)";
+                              }}
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18"/>
+                                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                              </svg>
+                            </button>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                    {analyzedBills.length > 5 && (
-                      <div style={{ 
-                        textAlign: "center", 
-                        marginTop: "1.5rem",
-                      }}>
-                        <button 
-                          onClick={() => setShowAllAnalyzedBills(!showAllAnalyzedBills)} 
-                          style={{
-                            background: "transparent",
-                            border: `1px solid ${theme.colors.primary}`,
-                            borderRadius: theme.borderRadius.md,
-                            color: theme.colors.primary,
-                            padding: "0.75rem 1.5rem",
-                            cursor: "pointer",
-                            fontSize: "0.9rem",
-                            fontWeight: "600",
-                            transition: "all 0.2s ease",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.target.style.background = "rgba(80, 70, 229, 0.1)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.target.style.background = "transparent";
-                          }}
-                        >
-                          {showAllAnalyzedBills ? "Show Less" : "See More"}
-                        </button>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{
-                    textAlign: "center",
-                    padding: "2.5rem 1.5rem",
-                    background: "rgba(30, 41, 59, 0.3)",
-                    borderRadius: theme.borderRadius.lg,
-                    color: theme.colors.textSecondary,
-                    border: "1px dashed rgba(255, 255, 255, 0.1)",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "0.75rem"
-                  }}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                      <polyline points="14 2 14 8 20 8" />
-                      <line x1="16" y1="13" x2="8" y2="13" />
-                      <line x1="16" y1="17" x2="8" y2="17" />
-                      <polyline points="10 9 9 9 8 9" />
-                    </svg>
-                    <div>No analyzed bills yet</div>
-                    <div style={{ fontSize: "0.8rem", opacity: 0.7 }}>Upload and analyze a bill to get started</div>
+                    ))}
                   </div>
-                )}
-              </div>
+                  {analyzedBills.length > 5 && (
+                    <div style={{ 
+                      textAlign: "center", 
+                      marginTop: "1.5rem",
+                    }}>
+                      <button 
+                        onClick={() => setShowAllAnalyzedBills(!showAllAnalyzedBills)} 
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${theme.colors.primary}`,
+                          borderRadius: theme.borderRadius.md,
+                          color: theme.colors.primary,
+                          padding: "0.75rem 1.5rem",
+                          cursor: "pointer",
+                          fontSize: "0.9rem",
+                          fontWeight: "600",
+                          transition: "all 0.2s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = "rgba(80, 70, 229, 0.1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = "transparent";
+                        }}
+                      >
+                        {showAllAnalyzedBills ? "Show Less" : "See More"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{
+                  textAlign: "center",
+                  padding: "2.5rem 1.5rem",
+                  background: "rgba(30, 41, 59, 0.3)",
+                  borderRadius: theme.borderRadius.lg,
+                  color: theme.colors.textSecondary,
+                  border: "1px dashed rgba(255, 255, 255, 0.1)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "0.75rem"
+                }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                    <polyline points="10 9 9 9 8 9" />
+                  </svg>
+                  <div>No analyzed bills yet</div>
+                  <div style={{ fontSize: "0.8rem", opacity: 0.7 }}>Upload and analyze a bill to get started</div>
+                </div>
+              )}
             </div>
           </div>
 
