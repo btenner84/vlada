@@ -261,7 +261,7 @@ async function matchServiceToMedicare(service, additionalContext = {}) {
     
   } catch (error) {
     console.error('[MEDICARE_MATCHER] Error in Medicare matching:', error);
-    return {
+          return {
       matched: false,
       confidence: 0,
       reasoning: `Error matching Medicare rate: ${error.message}`
@@ -567,7 +567,7 @@ async function matchEmergencyCare(description, service, context) {
       const directMatch = await lookupMedicareRate(service.code);
       if (directMatch) {
         console.log(`[MEDICARE_MATCHER] Found direct match for code ${service.code} in emergency care`);
-        return {
+    return {
           ...directMatch,
           confidence: 0.95,
           reasoning: `Direct match by code ${service.code} for emergency care service`,
@@ -609,10 +609,10 @@ async function matchEmergencyCare(description, service, context) {
         confidence: 0.9,
         reasoning: `Matched as emergency department visit with ${code === '99285' ? 'highest' : code === '99284' ? 'high' : 'moderate'} severity`,
         matchMethod: 'emergency_care_pattern'
-      };
-    }
-    
-    return null;
+    };
+  }
+  
+  return null;
   } catch (error) {
     console.error('[MEDICARE_MATCHER] Error matching emergency care:', error);
     return null;

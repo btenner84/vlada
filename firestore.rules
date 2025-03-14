@@ -33,6 +33,11 @@ service cloud.firestore {
       }
     }
 
+    // Allow authenticated users to read and write to the analysis_progress collection
+    match /analysis_progress/{progressId} {
+      allow read, write: if isAuthenticated();
+    }
+
     // Allow authenticated users to read reference collections for code lookups
     match /cptCodeMappings/{codeId} {
       allow read: if isAuthenticated();

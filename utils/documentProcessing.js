@@ -363,10 +363,27 @@ export async function processWithLLM(text, isVerificationMode = false) {
           throw new Error('Services must be a non-empty array');
         }
         
-        // Enhance services with CPT codes if they don't already have valid codes
-        console.log('Before CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
+        // Continue with additional processing as needed
+        console.log('Processing services for code lookup and pricing...');
+        
+        // Add performance monitoring around the service enhancement
+        console.log(`[PERFORMANCE] Starting parallel service enhancement for ${parsedResponse.services.length} services`);
+        const enhancementStartTime = Date.now();
+        
         parsedResponse.services = await enhanceServicesWithCPTCodes(parsedResponse.services, parsedResponse.patientInfo, parsedResponse.billInfo);
-        console.log('After CPT enhancement, services:', JSON.stringify(parsedResponse.services, null, 2));
+        
+        const enhancementEndTime = Date.now();
+        const enhancementDuration = enhancementEndTime - enhancementStartTime;
+        console.log(`[PERFORMANCE] Service enhancement completed in ${enhancementDuration}ms (${(enhancementDuration/1000).toFixed(2)}s)`);
+        console.log(`[PERFORMANCE] Average time per service: ${(enhancementDuration / parsedResponse.services.length).toFixed(2)}ms`);
+        
+        // Add performance metrics to the response for monitoring
+        parsedResponse.performanceMetrics = {
+          enhancementTotalTime: enhancementDuration,
+          serviceCount: parsedResponse.services.length,
+          averageTimePerService: enhancementDuration / parsedResponse.services.length,
+          processingMethod: 'parallel'
+        };
       }
 
       return parsedResponse;
@@ -773,11 +790,12 @@ Respond in JSON format:
 async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
   console.log('[SERVICE_ENHANCEMENT] Starting service enhancement for services:', JSON.stringify(services, null, 2));
   
-  const enhancedServices = [];
+  // Instead of processing services sequentially, we'll process them in parallel
+  console.log(`[SERVICE_ENHANCEMENT] Processing ${services.length} services in parallel`);
   
-  for (let i = 0; i < services.length; i++) {
-    const service = services[i];
-    console.log(`[SERVICE_ENHANCEMENT] Processing service ${i + 1}/${services.length}:`, service);
+  // Create an async function to process a single service
+  const processService = async (service, index) => {
+    console.log(`[SERVICE_ENHANCEMENT] Processing service ${index + 1}/${services.length}:`, service);
     
     try {
       // Start by copying the service or ensuring it has the enhanced structure
@@ -790,20 +808,20 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
           const categoryResult = await categorizeService(service);
           enhancedService.category = categoryResult.category;
           enhancedService.categoryReasoning = categoryResult.reasoning;
-          console.log('[SERVICE_ENHANCEMENT] Service categorized as:', enhancedService.category);
+          console.log(`[SERVICE_ENHANCEMENT] Service ${index + 1} categorized as:`, enhancedService.category);
         }
       }
       
       // Determine which category to use for matching
       const category = enhancedService.enhancedCategory || enhancedService.category;
-      console.log('[SERVICE_ENHANCEMENT] Using category for matching:', category);
+      console.log(`[SERVICE_ENHANCEMENT] Using category for matching service ${index + 1}:`, category);
       
       // Handle different categories with their respective matchers
       switch (category) {
         // Office Visits & Consultations
         case 'Office Visits & Consultations':
         case 'Office visits and Consultations':
-          console.log('[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Office Visit');
+          console.log(`[SERVICE_ENHANCEMENT] Using Medicare Fee Schedule for Office Visit (service ${index + 1})`);
           const medicareMatch = await matchServiceToMedicare(service, {
             category: 'Office visits and Consultations', // Use old category for backward compatibility
             patientAge: patientInfo?.age,
@@ -962,7 +980,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         // Lab & Diagnostic Tests
         case 'Lab & Diagnostic Tests':
         case 'Lab and Diagnostic Tests':
-          console.log('[SERVICE_ENHANCEMENT] Using Medicare CLFS database for Lab/Diagnostic');
+          console.log(`[SERVICE_ENHANCEMENT] Using Medicare CLFS database for Lab/Diagnostic (service ${index + 1})`);
           const labMatch = await matchServiceToLab(service.description, {
             category: 'Lab and Diagnostic Tests', // Use old category for backward compatibility
             patientAge: patientInfo?.age,
@@ -981,9 +999,9 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             
             // Log whether this was a database match or fallback
             if (labMatch.reasoning && labMatch.reasoning.includes('database')) {
-              console.log('[SERVICE_ENHANCEMENT] Using database rates for lab service');
+              console.log(`[SERVICE_ENHANCEMENT] Using database rates for lab service ${index + 1}`);
             } else {
-              console.log('[SERVICE_ENHANCEMENT] Using fallback rates for lab service:', labMatch.reasoning);
+              console.log(`[SERVICE_ENHANCEMENT] Using fallback rates for lab service ${index + 1}:`, labMatch.reasoning);
             }
             
             // Calculate potential savings
@@ -994,10 +1012,10 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         // Drugs & Infusions
         case 'Drugs & Infusions (Hospital vs. Retail)':
         case 'Drugs and Infusions':
-          console.log('[SERVICE_ENHANCEMENT] Using Medicare ASP database for Drugs/Infusions');
+          console.log(`[SERVICE_ENHANCEMENT] Using Medicare ASP database for Drugs/Infusions (service ${index + 1})`);
           const drugMatch = await matchServiceToDrug(service);
           
-          console.log('[SERVICE_ENHANCEMENT] Drug match result:', drugMatch);
+          console.log(`[SERVICE_ENHANCEMENT] Drug match result for service ${index + 1}:`, drugMatch);
           
           if (drugMatch && drugMatch.matched) {
             enhancedService.code = drugMatch.code;
@@ -1010,20 +1028,20 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             
             // Log whether this was a database match or fallback
             if (drugMatch.reasoning && drugMatch.reasoning.includes('database')) {
-              console.log('[SERVICE_ENHANCEMENT] Using database rates for drug service');
+              console.log(`[SERVICE_ENHANCEMENT] Using database rates for drug service ${index + 1}`);
             } else {
-              console.log('[SERVICE_ENHANCEMENT] Using fallback rates for drug service:', drugMatch.reasoning);
+              console.log(`[SERVICE_ENHANCEMENT] Using fallback rates for drug service ${index + 1}:`, drugMatch.reasoning);
             }
             
             // Set both original ASP price and ASP+6%
             if (drugMatch.price) {
               enhancedService.aspPrice = drugMatch.price;
               enhancedService.reimbursementRate = drugMatch.price * 1.06;
-              console.log('[SERVICE_ENHANCEMENT] Set ASP price:', drugMatch.price, 'and ASP+6%:', enhancedService.reimbursementRate);
+              console.log(`[SERVICE_ENHANCEMENT] Set ASP price for service ${index + 1}:`, drugMatch.price, 'and ASP+6%:', enhancedService.reimbursementRate);
               
               // Calculate potential savings
               enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
-              console.log('[SERVICE_ENHANCEMENT] Calculated savings:', enhancedService.potentialSavings);
+              console.log(`[SERVICE_ENHANCEMENT] Calculated savings for service ${index + 1}:`, enhancedService.potentialSavings);
             }
 
             // If the price was adjusted for dosage, include that information
@@ -1099,7 +1117,7 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
           break;
           
         default:
-          console.log('[SERVICE_ENHANCEMENT] Unknown category:', category);
+          console.log(`[SERVICE_ENHANCEMENT] Unknown category for service ${index + 1}:`, category);
           // Try to use CPT matcher as fallback
           const cptMatch = await matchServiceToCPT(service.description, {
             patientAge: patientInfo?.age,
@@ -1134,17 +1152,28 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         enhancedService.potentialSavings = calculatePotentialSavings(enhancedService);
       }
       
-      // Add the enhanced service to the array
-      enhancedServices.push(enhancedService);
-      console.log('[SERVICE_ENHANCEMENT] Enhanced service result:', enhancedService);
+      console.log(`[SERVICE_ENHANCEMENT] Enhanced service ${index + 1} result:`, enhancedService);
+      return enhancedService;
     } catch (error) {
-      console.error(`[SERVICE_ENHANCEMENT] Error enhancing service ${i + 1}:`, error);
-      enhancedServices.push(service); // Add the original service in case of error
+      console.error(`[SERVICE_ENHANCEMENT] Error enhancing service ${index + 1}:`, error);
+      return service; // Return the original service in case of error
     }
-  }
+  };
   
-  console.log('After CPT enhancement, services:', JSON.stringify(enhancedServices, null, 2));
-  return enhancedServices;
+  try {
+    // Process all services in parallel using Promise.all
+    const enhancedServices = await Promise.all(
+      services.map((service, index) => processService(service, index))
+    );
+    
+    console.log('[SERVICE_ENHANCEMENT] All services enhanced in parallel. Total services:', enhancedServices.length);
+    console.log('After CPT enhancement, services:', JSON.stringify(enhancedServices, null, 2));
+    return enhancedServices;
+  } catch (error) {
+    console.error('[SERVICE_ENHANCEMENT] Error in parallel processing:', error);
+    // If parallel processing fails, fall back to the original services
+    return services;
+  }
 }
 
 /**

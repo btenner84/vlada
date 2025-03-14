@@ -15,6 +15,7 @@ import { visionClient } from '../../utils/visionClient.js';
 import { matchServiceToCPT } from '../../utils/cptMatcher.js';
 import { adminDb as existingAdminDb, adminStorage as existingAdminStorage } from '../../firebase/admin.js';
 import { extractBillingCodes } from '../../utils/advancedClassifier.js';
+import { updateAnalysisProgress } from '../../utils/serverProgressTracker.js';
 
 // Use the existing Firebase Admin instance if available, otherwise initialize a new one
 let adminDb = existingAdminDb;
@@ -83,18 +84,39 @@ function sanitizeForFirestore(obj) {
   return sanitized;
 }
 
+// Add function to handle progress updates
+async function trackProgress(billId, stage, progressPercent, message = '') {
+  if (billId === 'client-request') return; // Skip tracking for client-side requests
+  
+  console.log(`PROGRESS UPDATE: ${billId} - Stage: ${stage} - Progress: ${progressPercent}%`);
+  
+  try {
+    await updateAnalysisProgress(billId, stage, progressPercent, message);
+    console.log(`PROGRESS UPDATE SUCCESSFUL: ${stage} at ${progressPercent}%`);
+  } catch (error) {
+    console.error('Error updating progress:', error);
+    console.error('Error details:', JSON.stringify(error));
+    // Continue processing even if progress tracking fails
+  }
+}
+
 // Function to analyze a document
 const analyzeDocument = async (fileUrl, userId, billId) => {
   console.log(`Starting document analysis for bill ${billId} from user ${userId}`);
   console.log(`File URL: ${fileUrl}`);
   
   try {
+    // Verify parameters
+    await trackProgress(billId, 'Starting Analysis', 10, 'Preparing to process document');
+    
     // Detect file type
+    await trackProgress(billId, 'Document Loaded', 15, 'Document loaded for processing');
     console.log('Detecting file type...');
     const fileType = await detectFileType(fileUrl);
     console.log(`File type detected: ${fileType}`);
     
     // Extract text based on file type
+    await trackProgress(billId, 'OCR Starting', 20, 'Beginning text extraction');
     console.log('Extracting text...');
     let extractedText = '';
     
@@ -148,6 +170,7 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
       throw new Error(`Unsupported file type: ${fileType}`);
     }
     
+    await trackProgress(billId, 'OCR Complete', 30, `Extracted ${extractedText.length} characters of text`);
     console.log(`Text extracted, length: ${extractedText.length} characters`);
     console.log(`First 100 chars: ${extractedText.substring(0, 100)}`);
     
@@ -157,6 +180,7 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
     console.log('Billing codes extracted:', JSON.stringify(extractedCodes, null, 2));
     
     // Use our enhanced AI analysis
+    await trackProgress(billId, 'AI Analysis', 40, 'Beginning AI document analysis');
     console.log('Starting enhanced AI analysis...');
     const enhancedAnalysisResult = await enhancedAnalyzeWithAI(extractedText);
     console.log('Enhanced analysis complete:', enhancedAnalysisResult.isMedicalBill ? 'Medical bill detected' : 'Not a medical bill');
@@ -181,6 +205,8 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
         console.log('Standard data extraction complete');
       }
     }
+    
+    await trackProgress(billId, 'Verification Complete', 50, 'Document verified as medical bill');
     
     // Update the bill document in Firestore
     if (billId !== 'client-request' && userId !== 'client-request') {
@@ -219,6 +245,20 @@ const analyzeDocument = async (fileUrl, userId, billId) => {
         // Continue even if update fails - the client will handle it
       }
     }
+    
+    await trackProgress(billId, 'Data Extraction', 60, 'Extracting bill data');
+    
+    // After data extraction, before service enhancement
+    await trackProgress(billId, 'Processing Services', 70, `Processing ${extractedData.services.length} medical services`);
+    
+    // After service enhancement
+    await trackProgress(billId, 'Calculating Rates', 85, 'Calculating Medicare rates and savings');
+    
+    // Before final response
+    await trackProgress(billId, 'Analysis Complete', 95, 'Finalizing analysis results');
+    
+    // Just before returning the final response
+    await trackProgress(billId, 'Complete', 100, 'Analysis complete');
     
     // Return the results
     return {

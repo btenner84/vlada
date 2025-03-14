@@ -3,57 +3,100 @@ import { useRouter } from 'next/router';
 import { auth, db, storage } from '../../firebase';
 import { theme } from '../../styles/theme';
 import Link from 'next/link';
-import { doc, getDoc, updateDoc, serverTimestamp, deleteDoc, collection, getDocs, setDoc, arrayUnion, addDoc, query, where, orderBy, limit } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, serverTimestamp, deleteDoc, collection, getDocs, setDoc, arrayUnion, addDoc, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
 import { analyzeWithOpenAI, askQuestionWithOpenAI } from '../../services/openaiService';
+import { initializeAnalysisProgress, clearAnalysisProgress } from '../../utils/progressTracker';
 
 const LoadingScreen = ({ progress }) => {
-  // Log the incoming progress to help with debugging
   useEffect(() => {
     console.log('LoadingScreen received progress update:', progress);
   }, [progress]);
 
-  // Default progress phases to show steps in the analysis process
+  // Define progress phases to match server-side stages
   const phases = [
-    { id: 'preparing', label: 'Preparing Analysis', complete: true },
-    { id: 'loading_model', label: 'Loading AI Models', complete: progress?.status === 'loading_model' || progress?.status === 'recognizing' || progress?.status === 'extracting' },
-    { id: 'recognizing', label: 'Analyzing Document', complete: progress?.status === 'recognizing' && progress?.progress >= 0.65 || progress?.status === 'extracting' },
-    { id: 'extracting', label: 'Extracting Bill Details', complete: progress?.status === 'extracting' },
-    { id: 'calculating', label: 'Calculating Savings', complete: false }
+    { id: 'initializing', label: 'Initializing', complete: true },
+    { id: 'starting_analysis', label: 'Starting Analysis', complete: progress?.stage === 'Starting Analysis' || progress?.progress >= 0.1 },
+    { id: 'ocr', label: 'Text Extraction', complete: progress?.stage === 'OCR Complete' || progress?.progress >= 0.3 },
+    { id: 'ai_analysis', label: 'AI Analysis', complete: progress?.stage === 'AI Analysis' || progress?.progress >= 0.4 },
+    { id: 'data_extraction', label: 'Data Extraction', complete: progress?.stage === 'Data Extraction' || progress?.progress >= 0.6 },
+    { id: 'processing_services', label: 'Processing Services', complete: progress?.stage === 'Processing Services' || progress?.progress >= 0.7 },
+    { id: 'calculating_rates', label: 'Calculating Rates', complete: progress?.stage === 'Calculating Rates' || progress?.progress >= 0.85 },
+    { id: 'complete', label: 'Analysis Complete', complete: progress?.stage === 'Complete' || progress?.progress >= 1 }
   ];
 
   // Calculate the current active phase
-  const currentPhaseIndex = phases.findIndex(phase => !phase.complete);
-  const currentPhase = currentPhaseIndex >= 0 ? phases[currentPhaseIndex] : phases[phases.length - 1];
+  const currentPhaseIndex = Math.max(0, phases.findIndex(phase => !phase.complete));
+  const currentPhase = phases[currentPhaseIndex] || phases[phases.length - 1];
   
-  // Calculate overall progress percentage based on phases and sub-progress
+  // Get the progress percentage from the server or calculate based on phases
   const calculateOverallProgress = () => {
+    // Debug the incoming progress object
+    console.log('LOADINGSCREEN: Current progress object:', progress);
+    
     // If no progress data is available, start at 5%
-    if (!progress) return 5;
-    
-    // Direct mapping based on the progress object
-    if (progress.status === 'loading_model') {
-      // Scale from 20% to 40%
-      return progress.progress ? (20 + progress.progress * 20) : 20;
+    if (!progress) {
+      console.log('LOADINGSCREEN: No progress data, using default 5%');
+      return 5;
     }
     
-    if (progress.status === 'recognizing') {
-      // Scale from 40% to 85% 
-      return 40 + (progress.progress * 45);
+    // If we have explicit progress from the server, use it directly
+    if (progress.progress !== undefined) {
+      const percentage = Math.round(progress.progress * 100);
+      console.log('LOADINGSCREEN: Using server progress:', percentage, 'Stage:', progress.stage);
+      
+      // Allow 100% for the Complete stage
+      if (progress.stage === 'Complete') {
+        return 100;
+      }
+      
+      // Cap other stages at 99% to show we're still working
+      return Math.min(99, percentage);
     }
     
-    if (progress.status === 'extracting') {
-      // Final phase before completion - 85% to 95%
-      return 85 + (progress.progress * 10);
+    // If we have stage information but no progress, estimate based on phase
+    if (progress.stage) {
+      console.log('LOADINGSCREEN: Estimating progress based on stage:', progress.stage);
+      // Map server-side stages to percentage values for fallback
+      const stageMap = {
+        'Initializing': 5,
+        'Starting Analysis': 10,
+        'Document Loaded': 15,
+        'OCR Starting': 20,
+        'OCR Complete': 30,
+        'AI Analysis': 40,
+        'Verification Complete': 50,
+        'Data Extraction': 60,
+        'Processing Services': 70,
+        'Calculating Rates': 85,
+        'Analysis Complete': 95,
+        'Complete': 100
+      };
+      
+      return stageMap[progress.stage] || 5;
     }
     
     // Default fallback
+    console.log('LOADINGSCREEN: Using fallback progress calculation');
     return 5;
   };
 
   const overallProgress = calculateOverallProgress();
   const displayProgress = Math.round(overallProgress);
+  
+  // Get current stage description
+  const getCurrentStageDescription = () => {
+    if (!progress) return "Preparing Analysis";
+    
+    // If we have a message from the server, use it
+    if (progress.message) {
+      return progress.message;
+    }
+    
+    // Otherwise use the stage name
+    return progress.stage || currentPhase.label;
+  };
 
   return (
     <div style={{
@@ -116,10 +159,7 @@ const LoadingScreen = ({ progress }) => {
           lineHeight: "1.5",
           color: theme.colors.textSecondary
         }}>
-          {progress?.status === 'loading_model' && "Loading AI Models"}
-          {progress?.status === 'recognizing' && `Analyzing Document (${Math.round(progress.progress * 100)}%)`}
-          {progress?.status === 'extracting' && "Extracting Medical Details"}
-          {!progress?.status && "Preparing Analysis"}
+          {getCurrentStageDescription()}
           <span className="animated-dots"></span>
         </div>
 
@@ -163,7 +203,7 @@ const LoadingScreen = ({ progress }) => {
           </div>
         </div>
 
-        {/* Step Indicators */}
+        {/* Step Indicators - Show only first 5 phases to avoid overcrowding */}
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -171,7 +211,7 @@ const LoadingScreen = ({ progress }) => {
           position: "relative",
           marginTop: "1rem"
         }}>
-          {phases.map((phase, index) => (
+          {phases.slice(0, 5).map((phase, index) => (
             <div key={phase.id} style={{
               display: "flex",
               flexDirection: "column",
@@ -180,7 +220,7 @@ const LoadingScreen = ({ progress }) => {
               width: "20%"
             }}>
               {/* Step Connector */}
-              {index < phases.length - 1 && (
+              {index < 4 && (
                 <div style={{
                   position: "absolute",
                   top: "12px",
@@ -198,7 +238,7 @@ const LoadingScreen = ({ progress }) => {
                 height: "24px",
                 borderRadius: "50%",
                 backgroundColor: phase.complete ? "#3B82F6" : 
-                  currentPhaseIndex === index ? "rgba(59, 130, 246, 0.3)" : "rgba(30, 41, 59, 0.5)",
+                  phases.indexOf(phase) === currentPhaseIndex ? "rgba(59, 130, 246, 0.3)" : "rgba(30, 41, 59, 0.5)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -206,7 +246,7 @@ const LoadingScreen = ({ progress }) => {
                 position: "relative",
                 zIndex: 1,
                 transition: "all 0.3s ease",
-                border: currentPhaseIndex === index ? "2px solid #3B82F6" : "none",
+                border: phases.indexOf(phase) === currentPhaseIndex ? "2px solid #3B82F6" : "none",
                 boxShadow: phase.complete ? "0 0 10px rgba(59, 130, 246, 0.5)" : "none"
               }}>
                 {phase.complete && (
@@ -214,7 +254,7 @@ const LoadingScreen = ({ progress }) => {
                     <path d="M5 13L9 17L19 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 )}
-                {currentPhaseIndex === index && (
+                {phases.indexOf(phase) === currentPhaseIndex && (
                   <div className="pulse-dot"></div>
                 )}
               </div>
@@ -222,9 +262,9 @@ const LoadingScreen = ({ progress }) => {
               {/* Step Label */}
               <div style={{
                 fontSize: "0.75rem",
-                color: currentPhaseIndex === index ? theme.colors.textPrimary : 
+                color: phases.indexOf(phase) === currentPhaseIndex ? theme.colors.textPrimary : 
                   phase.complete ? "rgba(59, 130, 246, 0.8)" : theme.colors.textSecondary,
-                fontWeight: currentPhaseIndex === index || phase.complete ? "600" : "400",
+                fontWeight: phases.indexOf(phase) === currentPhaseIndex || phase.complete ? "600" : "400",
                 textAlign: "center",
                 maxWidth: "80px",
                 height: "32px"
@@ -528,6 +568,54 @@ export default function BillAnalysis() {
     };
   }, [router, billId]);
 
+  // Progress tracking listener
+  useEffect(() => {
+    if (billId && analysisStatus === 'processing') {
+      console.log('CLIENT: Setting up progress listener for bill:', billId);
+      
+      const unsubscribe = onSnapshot(
+        doc(db, 'analysis_progress', billId),
+        (docSnapshot) => {
+          console.log('CLIENT: Received Firestore update for progress', docSnapshot.exists() ? 'Document exists' : 'Document does not exist');
+          if (docSnapshot.exists()) {
+            const progressData = docSnapshot.data();
+            console.log('CLIENT: Progress data received:', JSON.stringify(progressData));
+            console.log('CLIENT: Progress percentage:', progressData.progress * 100 + '%', 'Stage:', progressData.stage);
+            
+            // Update the ocrProgress state with the new progress data
+            setOcrProgress({
+              status: progressData.stage?.toLowerCase().replace(/\s+/g, '_'),
+              progress: progressData.progress,
+              message: progressData.message,
+              stage: progressData.stage
+            });
+            
+            // If progress is 100%, update the analysis status
+            if (progressData.progress >= 1) {
+              console.log('CLIENT: Analysis complete, refreshing bill data');
+              // Set analysis status to complete
+              setAnalysisStatus('complete');
+              // Refresh the bill data to get the completed analysis
+              fetchBillData(billId, user).catch(err => 
+                console.error('Error refreshing bill data after completion:', err)
+              );
+            }
+          } else {
+            console.log('CLIENT: Progress document does not exist yet');
+          }
+        },
+        (error) => {
+          console.error('CLIENT: Error listening to progress updates:', error);
+        }
+      );
+      
+      return () => {
+        console.log('CLIENT: Cleaning up progress listener');
+        unsubscribe();
+      };
+    }
+  }, [billId, analysisStatus, user]);
+
   const fetchBillData = async (id, currentUser) => {
     console.log('Fetching bill data for:', id, 'User:', currentUser?.uid);
     
@@ -679,6 +767,9 @@ export default function BillAnalysis() {
 
       setProcessingMethod('');
       setAnalysisStatus('processing');
+      
+      // Initialize progress tracking in Firestore
+      await initializeAnalysisProgress(billId);
       
       // First verify we can access the bill
       const billRef = doc(db, 'bills', billId);
@@ -986,21 +1077,18 @@ export default function BillAnalysis() {
   const handleOcrProgress = (m) => {
     console.log('Client OCR Progress:', m);
     
-    // More detailed progress handling
+    // If this is a client-side OCR update (legacy code)
     if (m.status === 'loading tesseract core' || m.status === 'initializing api') {
-      setOcrProgress({ status: 'loading_model', progress: 0.2 }); // Start at 20%
+      setOcrProgress({ status: 'loading_model', progress: 0.2 });
     } else if (m.status === 'initializing job') {
-      setOcrProgress({ status: 'loading_model', progress: 0.3 }); // 30%
+      setOcrProgress({ status: 'loading_model', progress: 0.3 });
     } else if (m.status === 'recognizing text') {
-      // Ensure progress is always at least 0.4 (40%) when we start recognizing
-      // and scales from 0.4 to 0.9 (40% to 90%)
-      const scaledProgress = 0.4 + (m.progress * 0.5); 
+      const scaledProgress = 0.4 + (m.progress * 0.5);
       setOcrProgress({ status: 'recognizing', progress: scaledProgress });
     } else if (m.status === 'done'){
-      // When OCR reports 'done'
-      setOcrProgress({ status: 'extracting', progress: 0.95 }); // Almost complete
+      setOcrProgress({ status: 'extracting', progress: 0.95 });
     } else {
-      // For any other status, set a reasonable progress value
+      // For any other client-side status
       setOcrProgress({ status: m.status || 'processing', progress: 0.1 });
     }
   };
@@ -1102,7 +1190,7 @@ export default function BillAnalysis() {
   }, [extractedData]);
 
   // Update the loading state check to only show the loading screen until analysis is complete
-  if (isLoading || ocrProgress || !extractedData) {
+  if (isLoading || (analysisStatus !== 'complete' && (ocrProgress || !extractedData))) {
     return (
       <LoadingScreen progress={ocrProgress} />
     );
