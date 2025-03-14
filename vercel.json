@@ -11,26 +11,32 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/analyze-universal", "destination": "/api/analyze-universal" },
+    { "source": "/api/analyze-universal", "destination": "/api/analyze-fallback" },
     { "source": "/api/analyze-fallback", "destination": "/api/analyze-fallback" },
     { "source": "/api/process-bill", "destination": "/api/process-bill" }
   ],
   "redirects": [],
   "cleanUrls": true,
   "trailingSlash": false,
-  "crons": [],
   "builds": [
     {
       "src": "package.json",
       "use": "@vercel/next",
       "config": {
-        "installCommand": "npm install --platform=linux --arch=x64 sharp && npm install",
-        "buildCommand": "npm run build"
+        "skipAutoInstall": true
       }
     }
   ],
   "env": {
     "NODE_ENV": "production",
-    "SHARP_IGNORE_GLOBAL_LIBVIPS": "1"
+    "SHARP_IGNORE_GLOBAL_LIBVIPS": "1",
+    "SKIP_SHARP": "true",
+    "VERCEL_SERVERLESS": "true"
+  },
+  "build": {
+    "env": {
+      "SKIP_SHARP": "true",
+      "VERCEL_SERVERLESS": "true" 
+    }
   }
 } 

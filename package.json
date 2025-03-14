@@ -9,9 +9,9 @@
     "dev": "next dev",
     "build": "next build",
     "postinstall": "node scripts/install-sharp.js",
-    "vercel-build": "SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm run build",
+    "vercel-build": "SKIP_SHARP=true SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm run build",
     "prepare-sharp": "node -e \"try { require('./sharp.config.js').afterInstall() } catch(e) { console.error(e) }\"",
-    "prebuild": "npm run prepare-sharp",
+    "prebuild": "node -e \"process.env.SKIP_SHARP !== 'true' && require('./scripts/install-sharp.js')\"",
     "start": "next start"
   },
   "dependencies": {

@@ -5,18 +5,27 @@
 import { execSync } from 'child_process';
 import os from 'os';
 
+// Check if we should skip Sharp installation entirely (for serverless environments)
+const skipSharp = process.env.SKIP_SHARP === 'true' || false;
+
+// Check if we're running in a Vercel environment
+const isVercel = process.env.VERCEL === '1' || process.env.NOW_REGION || process.env.VERCEL_REGION;
+const isServerless = isVercel || process.env.VERCEL_SERVERLESS === 'true';
+
+console.log(`Environment detection: isVercel=${isVercel}, isServerless=${isServerless}, skipSharp=${skipSharp}`);
+
+// Skip installation in serverless environments if requested
+if (skipSharp || isServerless) {
+  console.log('Skipping Sharp installation for serverless environment');
+  console.log('The application will use fallback mechanisms for image processing');
+  process.exit(0);
+}
+
 // Get the current platform
 const platform = os.platform();
 const arch = os.arch();
 
 console.log(`Installing Sharp for platform: ${platform}, architecture: ${arch}`);
-
-// Check if we're running in a Vercel environment
-const isVercel = process.env.VERCEL === '1' || process.env.NOW_REGION || process.env.VERCEL_REGION;
-
-if (isVercel) {
-  console.log('Detected Vercel environment, using special installation flags');
-}
 
 try {
   // For linux-x64 environments (common in production/serverless)

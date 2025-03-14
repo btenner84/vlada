@@ -1,7 +1,8 @@
 import pdf from 'pdf-parse';
 import OpenAI from 'openai';
 import fetch from 'node-fetch';
-import sharp from 'sharp';
+// Removing direct sharp import - we'll only use the safe import
+// import sharp from 'sharp';
 import { ImageAnnotatorClient } from '@google-cloud/vision';
 import { analyzeMedicalBillText } from './openaiClient.js';
 import { matchServiceToCPT } from './cptMatcher.js';
