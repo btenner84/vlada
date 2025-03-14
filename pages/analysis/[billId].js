@@ -9,6 +9,52 @@ import { analyzeDocumentClient } from '../../utils/clientDocumentProcessing';
 import { analyzeWithOpenAI, askQuestionWithOpenAI } from '../../services/openaiService';
 
 const LoadingScreen = ({ progress }) => {
+  // Log the incoming progress to help with debugging
+  useEffect(() => {
+    console.log('LoadingScreen received progress update:', progress);
+  }, [progress]);
+
+  // Default progress phases to show steps in the analysis process
+  const phases = [
+    { id: 'preparing', label: 'Preparing Analysis', complete: true },
+    { id: 'loading_model', label: 'Loading AI Models', complete: progress?.status === 'loading_model' || progress?.status === 'recognizing' || progress?.status === 'extracting' },
+    { id: 'recognizing', label: 'Analyzing Document', complete: progress?.status === 'recognizing' && progress?.progress >= 0.65 || progress?.status === 'extracting' },
+    { id: 'extracting', label: 'Extracting Bill Details', complete: progress?.status === 'extracting' },
+    { id: 'calculating', label: 'Calculating Savings', complete: false }
+  ];
+
+  // Calculate the current active phase
+  const currentPhaseIndex = phases.findIndex(phase => !phase.complete);
+  const currentPhase = currentPhaseIndex >= 0 ? phases[currentPhaseIndex] : phases[phases.length - 1];
+  
+  // Calculate overall progress percentage based on phases and sub-progress
+  const calculateOverallProgress = () => {
+    // If no progress data is available, start at 5%
+    if (!progress) return 5;
+    
+    // Direct mapping based on the progress object
+    if (progress.status === 'loading_model') {
+      // Scale from 20% to 40%
+      return progress.progress ? (20 + progress.progress * 20) : 20;
+    }
+    
+    if (progress.status === 'recognizing') {
+      // Scale from 40% to 85% 
+      return 40 + (progress.progress * 45);
+    }
+    
+    if (progress.status === 'extracting') {
+      // Final phase before completion - 85% to 95%
+      return 85 + (progress.progress * 10);
+    }
+    
+    // Default fallback
+    return 5;
+  };
+
+  const overallProgress = calculateOverallProgress();
+  const displayProgress = Math.round(overallProgress);
+
   return (
     <div style={{
       height: "100vh",
@@ -18,61 +64,361 @@ const LoadingScreen = ({ progress }) => {
       justifyContent: "center",
       background: theme.colors.bgPrimary,
       color: theme.colors.textPrimary,
-      gap: "2rem"
+      gap: "3rem",
+      padding: "2rem"
     }}>
-      {/* Animated Brain Icon */}
+      {/* Header */}
       <div style={{
-        fontSize: "4rem",
-        animation: "pulse 2s infinite"
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "1rem"
       }}>
-        🧠
+        {/* Animated Brain Icon with Orbit Effect */}
+        <div style={{
+          position: "relative",
+          width: "120px",
+          height: "120px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <div className="brain-container">
+            <div className="brain">🧠</div>
+            <div className="orbit">
+              <div className="orbit-particle"></div>
+              <div className="orbit-particle delay-1"></div>
+              <div className="orbit-particle delay-2"></div>
+              <div className="orbit-particle delay-3"></div>
+            </div>
+          </div>
       </div>
+
+        {/* Main Title */}
+        <h1 style={{
+          fontSize: "2rem",
+          fontWeight: "700",
+          marginBottom: "0.5rem",
+          background: theme.colors.gradientPrimary,
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          textAlign: "center"
+        }}>
+          Analyzing Your Medical Bill
+        </h1>
 
       {/* Progress Text */}
       <div style={{
-        fontSize: "1.5rem",
-        fontWeight: "600",
+          fontSize: "1.2rem",
+          fontWeight: "500",
         textAlign: "center",
         maxWidth: "600px",
-        lineHeight: "1.5"
-      }}>
-        {progress?.status === 'loading_model' && "Loading OCR model..."}
-        {progress?.status === 'recognizing' && (
-          <>
-            Analyzing your document
+          lineHeight: "1.5",
+          color: theme.colors.textSecondary
+        }}>
+          {progress?.status === 'loading_model' && "Loading AI Models"}
+          {progress?.status === 'recognizing' && `Analyzing Document (${Math.round(progress.progress * 100)}%)`}
+          {progress?.status === 'extracting' && "Extracting Medical Details"}
+          {!progress?.status && "Preparing Analysis"}
+          <span className="animated-dots"></span>
+        </div>
+
+        {/* Percentage Counter */}
             <div style={{
-              fontSize: "1rem",
-              color: theme.colors.textSecondary,
-              marginTop: "0.5rem"
-            }}>
-              {Math.round(progress.progress * 100)}% complete
+          fontSize: "3rem",
+          fontWeight: "800",
+          marginTop: "0.5rem",
+          color: theme.colors.textPrimary
+        }} className="percentage-counter">
+          {displayProgress}
             </div>
-          </>
-        )}
-        {!progress?.status && "Preparing analysis..."}
       </div>
 
       {/* Progress Bar */}
       <div style={{
-        width: "300px",
-        height: "4px",
-        background: "rgba(255, 255, 255, 0.1)",
-        borderRadius: "2px",
-        overflow: "hidden"
+        width: "400px",
+        maxWidth: "90vw",
       }}>
+        {/* Main Progress Bar */}
         <div style={{
-          width: `${progress?.progress ? Math.round(progress.progress * 100) : 0}%`,
+          width: "100%",
+          height: "10px",
+          background: "rgba(30, 41, 59, 0.5)",
+          borderRadius: "8px",
+          overflow: "hidden",
+          boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.3)",
+          marginBottom: "2rem",
+          position: "relative"
+        }}>
+          <div style={{
+            width: `${overallProgress}%`,
           height: "100%",
-          background: theme.colors.gradientPrimary,
-          transition: "width 0.3s ease"
-        }} />
+            background: `linear-gradient(90deg, #3B82F6, #8B5CF6)`,
+            borderRadius: "8px",
+            transition: "width 0.5s ease",
+            position: "relative",
+            overflow: "hidden"
+          }}>
+            <div className="progress-glow"></div>
+          </div>
+        </div>
+
+        {/* Step Indicators */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          width: "100%",
+          position: "relative",
+          marginTop: "1rem"
+        }}>
+          {phases.map((phase, index) => (
+            <div key={phase.id} style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              position: "relative",
+              width: "20%"
+            }}>
+              {/* Step Connector */}
+              {index < phases.length - 1 && (
+                <div style={{
+                  position: "absolute",
+                  top: "12px",
+                  left: "50%",
+                  width: "100%",
+                  height: "2px",
+                  background: phase.complete ? "rgba(59, 130, 246, 0.5)" : "rgba(255, 255, 255, 0.1)",
+                  zIndex: 0
+                }} />
+              )}
+
+              {/* Step Indicator */}
+              <div style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: phase.complete ? "#3B82F6" : 
+                  currentPhaseIndex === index ? "rgba(59, 130, 246, 0.3)" : "rgba(30, 41, 59, 0.5)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: "8px",
+                position: "relative",
+                zIndex: 1,
+                transition: "all 0.3s ease",
+                border: currentPhaseIndex === index ? "2px solid #3B82F6" : "none",
+                boxShadow: phase.complete ? "0 0 10px rgba(59, 130, 246, 0.5)" : "none"
+              }}>
+                {phase.complete && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M5 13L9 17L19 7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+                {currentPhaseIndex === index && (
+                  <div className="pulse-dot"></div>
+                )}
+              </div>
+
+              {/* Step Label */}
+              <div style={{
+                fontSize: "0.75rem",
+                color: currentPhaseIndex === index ? theme.colors.textPrimary : 
+                  phase.complete ? "rgba(59, 130, 246, 0.8)" : theme.colors.textSecondary,
+                fontWeight: currentPhaseIndex === index || phase.complete ? "600" : "400",
+                textAlign: "center",
+                maxWidth: "80px",
+                height: "32px"
+              }}>
+                {phase.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* AI Analysis Information */}
+      <div style={{
+        background: "rgba(30, 41, 59, 0.3)",
+        border: "1px solid rgba(255, 255, 255, 0.1)",
+        borderRadius: "12px",
+        padding: "1.5rem",
+        maxWidth: "600px",
+        width: "100%",
+        marginTop: "1rem",
+        backdropFilter: "blur(8px)"
+      }}>
+        <h3 style={{
+          fontSize: "1.1rem",
+          fontWeight: "600",
+          marginBottom: "1rem",
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem"
+        }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="#3B82F6" strokeWidth="2"/>
+            <path d="M12 8V12L14 14" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Advanced AI Analysis
+        </h3>
+
+        <p style={{
+          color: theme.colors.textSecondary,
+          lineHeight: "1.6",
+          fontSize: "0.95rem",
+        }}>
+          Our AI is analyzing your bill using a multi-stage process that includes:
+        </p>
+
+        <ul style={{
+          marginTop: "0.75rem",
+          listStyleType: "none",
+          display: "flex",
+          flexDirection: "column",
+          gap: "0.5rem"
+        }}>
+          {[
+            "Optical Character Recognition (OCR) to extract text",
+            "Medical terminology detection and categorization",
+            "CPT/HCPCS code matching for each service",
+            "Medicare rate comparison for potential savings",
+            "Verification and error detection"
+          ].map((step, index) => (
+            <li key={index} style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              color: theme.colors.textSecondary,
+              fontSize: "0.9rem"
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M5 13L9 17L19 7" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              {step}
+            </li>
+          ))}
+        </ul>
       </div>
 
       <style jsx>{`
         @keyframes pulse {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.1); }
-          100% { transform: scale(1); }
+          0% { transform: scale(1); opacity: 0.8; }
+          50% { transform: scale(1.2); opacity: 1; }
+          100% { transform: scale(1); opacity: 0.8; }
+        }
+        
+        @keyframes rotate {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        
+        @keyframes float {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+          100% { transform: translateY(0px); }
+        }
+        
+        .brain-container {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .brain {
+          font-size: 4rem;
+          position: relative;
+          z-index: 2;
+          animation: float 3s ease-in-out infinite;
+        }
+        
+        .orbit {
+          position: absolute;
+          width: 120px;
+          height: 120px;
+          border-radius: 50%;
+          animation: rotate 10s linear infinite;
+          border: 1px dashed rgba(59, 130, 246, 0.3);
+        }
+        
+        .orbit-particle {
+          position: absolute;
+          width: 12px;
+          height: 12px;
+          background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+          border-radius: 50%;
+          top: -6px;
+          left: 54px;
+          box-shadow: 0 0 10px rgba(59, 130, 246, 0.7);
+        }
+        
+        .delay-1 {
+          animation-delay: 2.5s;
+          transform: rotate(90deg) translateX(60px);
+        }
+        
+        .delay-2 {
+          animation-delay: 5s;
+          transform: rotate(180deg) translateX(60px);
+        }
+        
+        .delay-3 {
+          animation-delay: 7.5s;
+          transform: rotate(270deg) translateX(60px);
+        }
+        
+        .progress-glow {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: linear-gradient(90deg, 
+            transparent 0%, 
+            rgba(59, 130, 246, 0.5) 50%, 
+            transparent 100%);
+          animation: shimmer 2s infinite;
+          width: 50%;
+        }
+        
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
+        }
+        
+        .animated-dots::after {
+          content: '';
+          animation: dots 1.5s infinite;
+        }
+        
+        @keyframes dots {
+          0%, 20% { content: '.'; }
+          40% { content: '..'; }
+          60%, 100% { content: '...'; }
+        }
+        
+        .percentage-counter {
+          position: relative;
+          display: inline-block;
+        }
+        
+        .percentage-counter::after {
+          content: '%';
+          position: absolute;
+          font-size: 1.5rem;
+          top: 0.2rem;
+          right: -1.5rem;
+          opacity: 0.7;
+        }
+        
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #3B82F6;
+          border-radius: 50%;
+          animation: pulse 1.5s infinite;
         }
       `}</style>
     </div>
@@ -636,13 +982,26 @@ export default function BillAnalysis() {
     }
   }, [extractedData]);
 
-  // Update the logger in getClientWorker
+  // Update the OCR progress handler to ensure it provides meaningful values
   const handleOcrProgress = (m) => {
     console.log('Client OCR Progress:', m);
-    if (m.status === 'loading tesseract core') {
-      setOcrProgress({ status: 'loading_model', progress: 0 });
+    
+    // More detailed progress handling
+    if (m.status === 'loading tesseract core' || m.status === 'initializing api') {
+      setOcrProgress({ status: 'loading_model', progress: 0.2 }); // Start at 20%
+    } else if (m.status === 'initializing job') {
+      setOcrProgress({ status: 'loading_model', progress: 0.3 }); // 30%
     } else if (m.status === 'recognizing text') {
-      setOcrProgress({ status: 'recognizing', progress: m.progress });
+      // Ensure progress is always at least 0.4 (40%) when we start recognizing
+      // and scales from 0.4 to 0.9 (40% to 90%)
+      const scaledProgress = 0.4 + (m.progress * 0.5); 
+      setOcrProgress({ status: 'recognizing', progress: scaledProgress });
+    } else if (m.status === 'done'){
+      // When OCR reports 'done'
+      setOcrProgress({ status: 'extracting', progress: 0.95 }); // Almost complete
+    } else {
+      // For any other status, set a reasonable progress value
+      setOcrProgress({ status: m.status || 'processing', progress: 0.1 });
     }
   };
 
@@ -745,74 +1104,7 @@ export default function BillAnalysis() {
   // Update the loading state check to only show the loading screen until analysis is complete
   if (isLoading || ocrProgress || !extractedData) {
     return (
-      <div style={{
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        background: theme.colors.bgPrimary,
-        color: theme.colors.textPrimary,
-        gap: "2rem"
-      }}>
-        {/* Animated Brain Icon */}
-        <div style={{
-          fontSize: "4rem",
-          animation: "pulse 2s infinite"
-        }}>
-          🧠
-        </div>
-
-        {/* Progress Text */}
-        <div style={{
-          fontSize: "1.5rem",
-          fontWeight: "600",
-          textAlign: "center",
-          maxWidth: "600px",
-          lineHeight: "1.5"
-        }}>
-          {ocrProgress?.status === 'loading_model' && "Loading OCR model..."}
-          {ocrProgress?.status === 'recognizing' && (
-            <>
-              Analyzing your document
-              <div style={{
-                fontSize: "1rem",
-                color: theme.colors.textSecondary,
-                marginTop: "0.5rem"
-              }}>
-                {Math.round(ocrProgress.progress * 100)}% complete
-              </div>
-            </>
-          )}
-          {!ocrProgress?.status && "Analyzing your medical bill..."}
-        </div>
-
-        {/* Progress Bar */}
-        {ocrProgress?.progress && (
-          <div style={{
-            width: "300px",
-            height: "4px",
-            background: "rgba(255, 255, 255, 0.1)",
-            borderRadius: "2px",
-            overflow: "hidden"
-          }}>
-            <div style={{
-              width: `${Math.round(ocrProgress.progress * 100)}%`,
-              height: "100%",
-              background: theme.colors.gradientPrimary,
-              transition: "width 0.3s ease"
-            }} />
-          </div>
-        )}
-
-        <style jsx>{`
-          @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-          }
-        `}</style>
-      </div>
+      <LoadingScreen progress={ocrProgress} />
     );
   }
 
