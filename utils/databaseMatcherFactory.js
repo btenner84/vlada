@@ -3,6 +3,7 @@ import { matchServiceToLab } from './labMatcher.js';
 import { matchServiceToDrug } from './drugMatcher.js';
 import { matchServiceToCPT } from './cptMatcher.js';
 import { matchServiceToOPPS } from './oppsMatcher.js';
+import { matchServiceToDME } from './dmeMatcher.js';
 
 /**
  * Factory function to get the appropriate matcher for a database
@@ -27,7 +28,7 @@ export function getDatabaseMatcher(database) {
       
     case 'DME':
       console.log('[DATABASE_MATCHER_FACTORY] Using DME Fee Schedule matcher');
-      return matchServiceToCPT;
+      return matchServiceToDME;
       
     case 'OPPS':
       console.log('[DATABASE_MATCHER_FACTORY] Using OPPS matcher');

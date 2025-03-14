@@ -1010,15 +1010,15 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
         // Medical Equipment
         case 'Medical Equipment (DME) & Therapies':
         case 'Medical Equipment':
-          console.log('[SERVICE_ENHANCEMENT] Using CPT matcher for Medical Equipment');
-          const equipmentMatch = await matchServiceToCPT(service.description, {
+          console.log('[SERVICE_ENHANCEMENT] Using DME matcher for Medical Equipment');
+          const equipmentMatch = await matchServiceToDME(service, {
             category: 'Medical Equipment',
             patientAge: patientInfo?.age,
             serviceDate: service.date
           });
           
           if (equipmentMatch) {
-            enhancedService.code = equipmentMatch.cptCode;
+            enhancedService.code = equipmentMatch.code;
             enhancedService.codeDescription = equipmentMatch.description;
             enhancedService.codeConfidence = equipmentMatch.confidence;
             enhancedService.codeReasoning = equipmentMatch.reasoning;
@@ -1026,8 +1026,8 @@ async function enhanceServicesWithCPTCodes(services, patientInfo, billInfo) {
             enhancedService.pricingModel = 'DMEPOS';
             enhancedService.reimbursementType = 'dme';
             
-            if (equipmentMatch.nonFacilityRate) {
-              enhancedService.reimbursementRate = equipmentMatch.nonFacilityRate;
+            if (equipmentMatch.price) {
+              enhancedService.reimbursementRate = equipmentMatch.price;
             }
           }
           break;

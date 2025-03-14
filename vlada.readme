@@ -1,0 +1,52 @@
+# VladaHealth Platform Overview
+
+## Introduction
+VladaHealth is a comprehensive platform designed to streamline the analysis and processing of medical bills. It leverages advanced technologies, including AI and database integrations, to provide accurate service matching and categorization.
+
+## Dashboard Features
+- **User Interface:** The dashboard serves as the central hub for users, offering functionalities such as bill uploads, analysis initiation, and result viewing.
+- **User Personalization:** Features like `UserAvatar`, `ProcessStep`, and `ProfileSection` enhance user engagement and process visualization.
+
+## Bill Analysis Process
+1. **Document Upload:** Users can upload medical bills in various formats (PDF, image).
+2. **Text Extraction:** Utilizes OCR for images and text extraction libraries for PDFs to extract service descriptions.
+3. **AI-Enhanced Analysis:** Determines if a document is a medical bill and extracts relevant data using enhanced AI analysis.
+4. **Fallback Mechanism:** If enhanced analysis is unavailable, the system falls back to standard LLM processing.
+5. **Firestore Update:** Analysis results are updated in Firestore, including timestamps for redundancy.
+
+## Service Matching
+### Matchers and Categories
+- **CPT Matcher:** Used for Office Visits, Consultations, Procedures, Surgeries, and Hospital Stays.
+- **Lab Matcher:** Used for Lab and Diagnostic Tests.
+- **Drug Matcher:** Used for Drugs, Infusions, and Medical Equipment.
+
+### Matching Process
+1. **Exact Code Lookup:** Validates and looks up extracted codes in the database.
+2. **Exact Description Match:** Normalizes and searches for exact matches in the database.
+3. **Keyword Matching:** Extracts keywords for enhanced matching.
+4. **AI-Driven Semantic Matching:** Uses OpenAI for potential matches if no high-confidence match is found.
+5. **Verification:** AI matches are verified against the database.
+
+## Service Categorization
+- **Categories:**
+  1. Office Visits and Consultations
+  2. Procedures and Surgeries
+  3. Lab and Diagnostic Tests
+  4. Drugs and Infusions
+  5. Medical Equipment
+  6. Hospital Stays and Emergency Care Visits
+- **Categorization Process:**
+  - Analyzes service descriptions for keywords and context.
+  - Uses additional context (e.g., service category, patient age) for refinement.
+  - Assigns services to categories to guide matcher selection.
+
+## Error Handling and Logging
+- **Robust Mechanisms:** Detailed logging and error handling are implemented to track and resolve issues.
+- **Environment Configuration:** Relies on environment variables for API keys and Firebase credentials.
+
+## User Experience
+- **UI Enhancements:** Intuitive navigation and feedback mechanisms improve user satisfaction.
+- **Loading Screen Logic:** Updated to handle non-medical bill cases effectively.
+
+## Conclusion
+VladaHealth offers a robust solution for medical bill analysis and service matching, leveraging advanced technologies to ensure accuracy and reliability. The platform's comprehensive approach to service categorization and matching, combined with a user-friendly interface, makes it a valuable tool for managing medical billing processes. 

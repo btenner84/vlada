@@ -394,14 +394,14 @@ export default function BillAnalysis() {
         // First try POST request to main endpoint
         console.log('Attempting POST request to main endpoint');
         response = await fetch(mainApiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(requestBody)
-        });
-        
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
         console.log('POST response status:', response.status);
         errorDetails.postStatus = response.status;
         
@@ -458,14 +458,14 @@ export default function BillAnalysis() {
             
             // Try POST to fallback endpoint
             response = await fetch(fallbackApiUrl, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify(requestBody)
-            });
-            
+            },
+            body: JSON.stringify(requestBody)
+          });
+          
             console.log('Fallback POST response status:', response.status);
             errorDetails.fallbackPostStatus = response.status;
             
@@ -492,7 +492,7 @@ export default function BillAnalysis() {
                 responseData = await response.json();
                 console.log('Fallback GET request successful');
                 usedFallback = true;
-              } else {
+          } else {
                 throw new Error(`All API requests failed. Last status: ${response.status}`);
               }
             }
@@ -546,7 +546,7 @@ export default function BillAnalysis() {
                   
                   // Reload the page to get the latest data
                   window.location.reload();
-                } else {
+      } else {
                   console.log('Bill still processing, current status:', billDoc.data()?.status || 'unknown');
                 }
               } catch (error) {
@@ -569,7 +569,7 @@ export default function BillAnalysis() {
             console.log('Processing complete response from main endpoint');
             setExtractedData(responseData.extractedData);
             setIsMedicalBill(responseData.isMedicalBill);
-            setAnalysisStatus('complete');
+          setAnalysisStatus('complete');
             setProcessingMethod(responseData.processingMethod || 'server');
             setRawData(prev => ({ ...prev, extractedText: responseData.extractedText }));
             
@@ -593,15 +593,15 @@ export default function BillAnalysis() {
           } else if (responseData.error) {
             // Handle error response
             throw new Error(responseData.error);
-          } else {
+        } else {
             // Handle unexpected response format
             console.error('Unexpected response format:', responseData);
             throw new Error('Unexpected response format from server');
-          }
+        }
         } else {
           throw new Error('No response data received');
-        }
-      } catch (error) {
+      }
+    } catch (error) {
         console.error('Error in API request:', error);
         setAnalysisStatus('error');
         setAnalysisError({
@@ -1234,73 +1234,123 @@ export default function BillAnalysis() {
                               gap: "0.5rem"
                             }}>
                               <div style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "flex-start",
+                                gap: "1rem",
+                                flexWrap: isMobile ? "wrap" : "nowrap"
+                            }}>
+                              <div style={{
                                 fontSize: isMobile ? "1.1rem" : "1.25rem",
                                 fontWeight: "600",
                                 color: "#F1F5F9",
+                                  flex: "1"
                               }}>
                                 {service.description}
                               </div>
                               
-                              {service.code && (
                                 <div style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  background: "rgba(59, 130, 246, 0.1)",
-                                  borderRadius: "0.5rem",
-                                  padding: "0.3rem 0.6rem",
-                                  width: "fit-content"
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.5rem",
+                                  alignItems: "flex-end",
+                                  minWidth: isMobile ? "100%" : "auto",
+                                  marginTop: isMobile ? "0.5rem" : "0"
                                 }}>
-                                  <span style={{
-                                    fontSize: "0.8rem",
-                                    fontWeight: "500",
-                                    color: "#3B82F6",
-                                    fontFamily: "monospace"
-                                  }}>
-                                    CODE: {service.code}
-                                    {service.codeMatchMethod && (
-                                      <span style={{ marginLeft: "0.5rem", fontSize: "0.7rem", color: "#94A3B8" }}>
-                                        via {service.codeMatchMethod.replace('_', ' ')}
-                                        {service.codeConfidence && ` (${Math.round(service.codeConfidence * 100)}% match)`}
-                                      </span>
-                                    )}
-                                  </span>
+                                  {/* AI Reasoning button moved to top right */}
+                                  {(service.codeReasoning || service.categoryReasoning) && (
+                                    <button
+                                      onClick={() => setExpandedReasoningId(expandedReasoningId === index ? null : index)}
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "0.5rem",
+                                        background: "rgba(59, 130, 246, 0.1)",
+                                        border: "1px solid rgba(59, 130, 246, 0.2)",
+                                        borderRadius: "0.5rem",
+                                        padding: "0.4rem 0.8rem",
+                                        fontSize: "0.8rem",
+                                        fontWeight: "500",
+                                        color: "#3B82F6",
+                                        cursor: "pointer",
+                                        width: "fit-content",
+                                        transition: "all 0.2s ease"
+                                      }}
+                                      aria-expanded={expandedReasoningId === index}
+                                      aria-controls={`reasoning-content-${index}`}
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                      </svg>
+                                      AI Reasoning
+                                      {expandedReasoningId === index ? (
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <polyline points="18 15 12 9 6 15"></polyline>
+                                        </svg>
+                                      ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                      )}
+                                    </button>
+                                  )}
                                 </div>
-                              )}
+                              </div>
                               
-                              {/* Display service category if available */}
-                              {service.category && (
-                                <div style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  background: "rgba(16, 185, 129, 0.1)",
-                                  borderRadius: "0.5rem",
-                                  padding: "0.3rem 0.6rem",
-                                  marginTop: "0.5rem",
-                                  width: "fit-content"
-                                }}>
-                                  <span style={{
-                                    fontSize: "0.8rem",
-                                    fontWeight: "500",
-                                    color: "#10B981"
+                              {/* Category and Code moved below service description */}
+                              <div style={{
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.5rem",
+                                marginTop: "0.5rem"
+                              }}>
+                                {/* Display service category if available */}
+                                {service.category && (
+                                  <div style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    background: "rgba(16, 185, 129, 0.1)",
+                                    borderRadius: "0.5rem",
+                                    padding: "0.3rem 0.6rem",
+                                    width: "fit-content"
                                   }}>
-                                    CATEGORY: {service.category}
-                                  </span>
-                                </div>
-                              )}
+                                    <span style={{
+                                      fontSize: "0.8rem",
+                                      fontWeight: "500",
+                                      color: "#10B981"
+                                    }}>
+                                      CATEGORY: {service.category}
+                                    </span>
+                                  </div>
+                                )}
+                                
+                                {/* CODE display */}
+                                {service.code && (
+                                  <div style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    background: "rgba(59, 130, 246, 0.1)",
+                                    borderRadius: "0.5rem",
+                                    padding: "0.3rem 0.6rem",
+                                    width: "fit-content"
+                                  }}>
+                                    <span style={{
+                                      fontSize: "0.8rem",
+                                      fontWeight: "500",
+                                      color: "#3B82F6",
+                                      fontFamily: "monospace"
+                                    }}>
+                                      CODE: {service.code}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
                               
                               {/* Display code description if available and different from service description */}
-                              {service.codeDescription && service.codeDescription !== service.description && (
-                                <div style={{
-                                  fontSize: "0.8rem",
-                                  color: "#94A3B8",
-                                  marginTop: "0.25rem",
-                                  fontStyle: "italic"
-                                }}>
-                                  {service.codeDescription}
-                                </div>
-                              )}
+                              {/* Removed code description display per user request */}
                               
-                              {/* Replace code reasoning with AI Reasoning button */}
+                              {/* AI Reasoning content */}
                               {(service.codeReasoning || service.categoryReasoning) && (
                                 <div style={{
                                   marginTop: "0.5rem",
@@ -1308,79 +1358,149 @@ export default function BillAnalysis() {
                                   flexDirection: "column",
                                   gap: "0.5rem"
                                 }}>
-                                  <button
-                                    onClick={() => setExpandedReasoningId(expandedReasoningId === index ? null : index)}
+                                  <div 
+                                    id={`reasoning-content-${index}`}
                                     style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "0.5rem",
-                                      background: "rgba(59, 130, 246, 0.1)",
-                                      border: "1px solid rgba(59, 130, 246, 0.2)",
-                                      borderRadius: "0.5rem",
-                                      padding: "0.4rem 0.8rem",
-                                      fontSize: "0.8rem",
-                                      fontWeight: "500",
-                                      color: "#3B82F6",
-                                      cursor: "pointer",
-                                      width: "fit-content"
-                                    }}
-                                  >
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                                      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                                    </svg>
-                                    AI Reasoning
-                                    {expandedReasoningId === index ? (
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="18 15 12 9 6 15"></polyline>
-                                      </svg>
-                                    ) : (
-                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="6 9 12 15 18 9"></polyline>
-                                      </svg>
-                                    )}
-                                  </button>
-                                  
-                                  {expandedReasoningId === index && (
-                                    <div style={{
                                       fontSize: "0.875rem",
                                       padding: "1rem",
                                       background: "rgba(15, 23, 42, 0.3)",
                                       borderRadius: "0.5rem",
-                                      border: "1px solid rgba(59, 130, 246, 0.15)"
-                                    }}>
+                                      border: "1px solid rgba(59, 130, 246, 0.15)",
+                                      maxHeight: expandedReasoningId === index ? "2000px" : "0",
+                                      overflow: "hidden",
+                                      opacity: expandedReasoningId === index ? 1 : 0,
+                                      transition: "max-height 0.3s ease-out, opacity 0.2s ease-out",
+                                      marginTop: expandedReasoningId === index ? "0.5rem" : "0"
+                                    }}
+                                    aria-hidden={expandedReasoningId !== index}
+                                  >
                                       {/* Step 1: Service Categorization */}
-                                      <div style={{ marginBottom: "1rem" }}>
+                                    <div style={{ marginBottom: "1.25rem" }}>
+                                      <div style={{ 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        gap: "0.75rem", 
+                                        marginBottom: "0.75rem" 
+                                      }}>
+                                        <div style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: "1.75rem",
+                                          height: "1.75rem",
+                                          background: "rgba(59, 130, 246, 0.15)",
+                                          borderRadius: "50%",
+                                          fontWeight: "600",
+                                          color: "#3B82F6"
+                                        }}>1</div>
                                         <h4 style={{ 
                                           color: "#3B82F6", 
                                           fontWeight: "600", 
-                                          marginBottom: "0.5rem" 
-                                        }}>1. Service Categorization</h4>
+                                          margin: "0",
+                                          fontSize: "0.95rem"
+                                        }}>Service Categorization</h4>
+                                      </div>
+                                      <div className="step-content">
                                         <div style={{ 
                                           background: "rgba(15, 23, 42, 0.5)", 
                                           padding: "0.75rem",
                                           borderRadius: "0.375rem",
                                           border: "1px solid rgba(59, 130, 246, 0.1)"
                                         }}>
-                                          <p>Service "{service.description}" was identified as <strong>{service.category}</strong></p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Reasoning: {service.categoryReasoning}
+                                          <p>Service "<strong>{service.description}</strong>" was identified as <strong>{service.category}</strong></p>
+                                          
+                                          <p style={{ 
+                                            marginTop: "0.5rem", 
+                                            color: "#94A3B8"
+                                          }}>
+                                            Reasoning: {
+                                              service.category === 'Hospital stays and emergency care visits' ? 
+                                              `The service described is an emergency room visit with the highest severity, indicated by the CPT code ${service.code}, which falls directly under the CPT range specified for emergency visits in the category 'Hospital Stays & Emergency Visits'.` :
+                                              service.category === 'Office visits and Consultations' ?
+                                              `This service represents a medical consultation or office visit as indicated by the CPT code ${service.code}, which is part of the Evaluation & Management (E&M) code range for professional services.` :
+                                              service.category === 'Procedures and Surgeries' ?
+                                              `This service involves a medical procedure or surgery as indicated by the CPT code ${service.code}, which falls within the procedural code range (10000-69999).` :
+                                              service.category === 'Lab and Diagnostic Tests' ?
+                                              `This service is a laboratory test or diagnostic procedure as indicated by the code ${service.code}, which is part of the pathology/laboratory or radiology code range.` :
+                                              service.category === 'Drugs and Infusions' ?
+                                              `This service involves medication administration or infusion as indicated by the HCPCS code ${service.code}, which is part of the J-code series for drugs.` :
+                                              service.category === 'Medical Equipment' ?
+                                              `This service relates to durable medical equipment as indicated by the HCPCS code ${service.code}, which is part of the E-code or K-code series for medical supplies and equipment.` :
+                                              `This service was categorized based on the description and code ${service.code} which best aligns with the ${service.category} category in our classification system.`
+                                            }
                                           </p>
-                                          {service.confidence && (
-                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
-                                              Confidence: {service.confidence}%
-                                            </p>
+                                          
+                                          {service.categoryConfidence && (
+                                            <div style={{ marginTop: "0.75rem" }}>
+                                              <div style={{ 
+                                                display: "flex", 
+                                                alignItems: "center", 
+                                                gap: "0.5rem", 
+                                                marginBottom: "0.25rem",
+                                                fontSize: "0.8rem"
+                                              }}>
+                                                <span>Confidence: {service.categoryConfidence}%</span>
+                                                <div style={{
+                                                  display: "inline-flex",
+                                                  alignItems: "center",
+                                                  justifyContent: "center",
+                                                  width: "1rem",
+                                                  height: "1rem",
+                                                  borderRadius: "50%",
+                                                  background: "rgba(148, 163, 184, 0.2)",
+                                                  color: "#94A3B8",
+                                                  fontSize: "0.7rem",
+                                                  cursor: "help",
+                                                  position: "relative"
+                                                }} title="How confident we are in this service categorization">ⓘ</div>
+                                              </div>
+                                              <div style={{
+                                                height: "0.5rem",
+                                                background: "rgba(255, 255, 255, 0.1)",
+                                                borderRadius: "1rem",
+                                                overflow: "hidden"
+                                              }}>
+                                                <div style={{
+                                                  height: "100%",
+                                                  width: `${service.categoryConfidence}%`,
+                                                  background: service.categoryConfidence >= 90 ? "#10B981" : 
+                                                             service.categoryConfidence >= 70 ? "#3B82F6" : "#F59E0B",
+                                                  borderRadius: "1rem",
+                                                  transition: "width 0.5s ease-out"
+                                                }}></div>
+                                              </div>
+                                            </div>
                                           )}
+                                        </div>
                                         </div>
                                       </div>
 
                                       {/* Step 2: Code Matching */}
-                                      <div style={{ marginBottom: "1rem" }}>
+                                    <div style={{ marginBottom: "1.25rem" }}>
+                                      <div style={{ 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        gap: "0.75rem", 
+                                        marginBottom: "0.75rem" 
+                                      }}>
+                                        <div style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: "1.75rem",
+                                          height: "1.75rem",
+                                          background: "rgba(59, 130, 246, 0.15)",
+                                          borderRadius: "50%",
+                                          fontWeight: "600",
+                                          color: "#3B82F6"
+                                        }}>2</div>
                                         <h4 style={{ 
                                           color: "#3B82F6", 
                                           fontWeight: "600", 
-                                          marginBottom: "0.5rem" 
-                                        }}>2. Code Matching</h4>
+                                          margin: "0",
+                                          fontSize: "0.95rem"
+                                        }}>Service/Code Matching</h4>
+                                      </div>
                                         <div style={{ 
                                           background: "rgba(15, 23, 42, 0.5)", 
                                           padding: "0.75rem",
@@ -1388,60 +1508,247 @@ export default function BillAnalysis() {
                                           border: "1px solid rgba(59, 130, 246, 0.1)"
                                         }}>
                                           <p>Most similar to: <strong>{service.matchedEntry?.description || service.codeDescription}</strong></p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Match Method: {service.matchMethod || service.codeMatchMethod || 'Direct match'}
-                                          </p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Database Used: {service.database || (service.category === 'Lab and Diagnostic Tests' ? 'CLFS' : 
-                                              service.category === 'Drugs and Infusions' ? 'ASP' : 'CPT')}
-                                          </p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Assigned Code: {service.code}
-                                          </p>
+                                        
+                                        <p style={{ 
+                                          marginTop: "0.5rem", 
+                                          color: "#94A3B8"
+                                        }}>
+                                          Reasoning: {service.matchMethod === 'ai_match_primary' || service.codeMatchMethod === 'ai_match_primary' ? 
+                                            `Our AI analyzed the medical terminology and context to identify the most appropriate standardized code (${service.code}).` : 
+                                            service.matchMethod === 'direct_code_match' || service.codeMatchMethod === 'direct_code_match' ? 
+                                            `The code ${service.code} was directly extracted from the bill and verified in our database.` :
+                                            service.matchMethod === 'database' || service.codeMatchMethod === 'database' ?
+                                            `We found this match by comparing key terms in the service description with our comprehensive medical code database, resulting in code ${service.code}.` :
+                                            `We matched this service to code ${service.code} using a combination of AI analysis and database lookups.`}
+                                          {service.database ? ` We referenced the ${service.database} database for verification.` : 
+                                            service.category === 'Lab and Diagnostic Tests' ? " We referenced the Clinical Laboratory Fee Schedule (CLFS) for verification." : 
+                                            service.category === 'Drugs and Infusions' ? " We referenced the Average Sales Price (ASP) database for verification." : 
+                                            " We referenced the Current Procedural Terminology (CPT) database for verification."}
+                                        </p>
+                                        
                                           {service.matchConfidence && (
-                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
-                                              Match Confidence: {service.matchConfidence}%
-                                            </p>
+                                          <div style={{ marginTop: "0.75rem" }}>
+                                            <div style={{ 
+                                              display: "flex", 
+                                              alignItems: "center", 
+                                              gap: "0.5rem", 
+                                              marginBottom: "0.25rem",
+                                              fontSize: "0.8rem"
+                                            }}>
+                                              <span>Confidence: {service.matchConfidence}%</span>
+                                              <div style={{
+                                                display: "inline-flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                width: "1rem",
+                                                height: "1rem",
+                                                borderRadius: "50%",
+                                                background: "rgba(148, 163, 184, 0.2)",
+                                                color: "#94A3B8",
+                                                fontSize: "0.7rem",
+                                                cursor: "help",
+                                                position: "relative"
+                                              }} title="How confident we are in this code match">ⓘ</div>
+                                            </div>
+                                            <div style={{
+                                              height: "0.5rem",
+                                              background: "rgba(255, 255, 255, 0.1)",
+                                              borderRadius: "1rem",
+                                              overflow: "hidden"
+                                            }}>
+                                              <div style={{
+                                                height: "100%",
+                                                width: `${service.matchConfidence}%`,
+                                                background: service.matchConfidence >= 90 ? "#10B981" : 
+                                                           service.matchConfidence >= 70 ? "#3B82F6" : "#F59E0B",
+                                                borderRadius: "1rem",
+                                                transition: "width 0.5s ease-out"
+                                              }}></div>
+                                            </div>
+                                          </div>
                                           )}
                                         </div>
                                       </div>
 
                                       {/* Step 3: Rate Determination */}
                                       <div>
+                                      <div style={{ 
+                                        display: "flex", 
+                                        alignItems: "center", 
+                                        gap: "0.75rem", 
+                                        marginBottom: "0.75rem" 
+                                      }}>
+                                        <div style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          width: "1.75rem",
+                                          height: "1.75rem",
+                                          background: "rgba(59, 130, 246, 0.15)",
+                                          borderRadius: "50%",
+                                          fontWeight: "600",
+                                          color: "#3B82F6"
+                                        }}>3</div>
                                         <h4 style={{ 
                                           color: "#3B82F6", 
                                           fontWeight: "600", 
-                                          marginBottom: "0.5rem" 
-                                        }}>3. Rate Determination</h4>
+                                          margin: "0",
+                                          fontSize: "0.95rem"
+                                        }}>Rate Determination</h4>
+                                      </div>
                                         <div style={{ 
                                           background: "rgba(15, 23, 42, 0.5)", 
                                           padding: "0.75rem",
                                           borderRadius: "0.375rem",
                                           border: "1px solid rgba(59, 130, 246, 0.1)"
                                         }}>
-                                          <p>Standard Rate: ${typeof service.standardRate === 'number' ? 
-                                            service.standardRate.toFixed(2) : 
-                                            service.standardRate?.replace(/[^0-9.]/g, '') || '0.00'}</p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Rate Type: {service.rateType || 'Medicare Fee Schedule'}
-                                          </p>
-                                          <p style={{ marginTop: "0.5rem", color: "#94A3B8" }}>
-                                            Billed Amount: ${typeof service.amount === 'number' ? 
+                                        <p>Service "<strong>{service.description}</strong>" with code <strong>{service.code}</strong> has a comparable price of <strong>${service.standardRate || service.medicareRate || service.fairPrice || '0.00'}</strong></p>
+                                        
+                                        <p style={{ 
+                                          marginTop: "0.5rem", 
+                                          color: "#94A3B8"
+                                        }}>
+                                          Reasoning: {
+                                            service.database === 'Medicare' ? 
+                                            `The Medicare rate for this service (${service.code}) is $${service.standardRate || service.medicareRate || '0.00'}. This is the amount Medicare would pay for this service, which is generally considered a fair baseline price.` :
+                                            service.database === 'Lab' ?
+                                            `The Clinical Laboratory Fee Schedule (CLFS) rate for this lab test (${service.code}) is $${service.standardRate || service.fairPrice || '0.00'}. This is the standard Medicare payment amount for this laboratory service.` :
+                                            service.database === 'Drug' ?
+                                            `The Average Sales Price (ASP) for this medication (${service.code}) is $${service.standardRate || service.fairPrice || '0.00'}. This represents the average price paid by all purchasers after discounts.` :
+                                            service.database === 'DME' ?
+                                            `The Durable Medical Equipment fee schedule rate for this item (${service.code}) is $${service.standardRate || service.fairPrice || '0.00'}. This is the standard Medicare payment amount for this equipment.` :
+                                            `Based on our database of healthcare prices, the standard rate for this service (${service.code}) is $${service.standardRate || '0.00'}. This represents the typical cost across multiple providers.`
+                                          }
+                                          {service.facilityRate && service.nonFacilityRate ? 
+                                            ` The rate varies based on location: $${service.facilityRate} (facility) or $${service.nonFacilityRate} (non-facility).` : ''}
+                                        </p>
+                                        
+                                        {/* Rate comparison section */}
+                                        <div style={{
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "1rem",
+                                          marginTop: "1rem",
+                                          flexDirection: isMobile ? "column" : "row"
+                                        }}>
+                                          {/* Billed amount */}
+                                          <div style={{
+                                            flex: "1",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "0.25rem",
+                                            width: isMobile ? "100%" : "auto"
+                                          }}>
+                                            <span style={{ 
+                                              fontSize: "0.75rem",
+                                              color: "#94A3B8",
+                                              textTransform: "uppercase",
+                                              letterSpacing: "0.05em"
+                                            }}>
+                                              Billed Amount
+                                            </span>
+                                            <span style={{ 
+                                              fontSize: "1.25rem", 
+                                              fontWeight: "700",
+                                              color: "#3B82F6" 
+                                            }}>
+                                              ${typeof service.amount === 'number' ? 
                                               service.amount.toFixed(2) : 
                                               service.amount?.replace(/[^0-9.]/g, '') || '0.00'}
-                                          </p>
+                                            </span>
+                                          </div>
+                                          
+                                          {/* Arrow */}
+                                          <div style={{
+                                            color: "#94A3B8",
+                                            fontSize: "1.25rem",
+                                            transform: isMobile ? "rotate(90deg)" : "none",
+                                            margin: isMobile ? "0.5rem 0" : "0"
+                                          }}>→</div>
+                                          
+                                          {/* Standard rate */}
+                                          <div style={{
+                                            flex: "1",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "0.25rem",
+                                            width: isMobile ? "100%" : "auto"
+                                          }}>
+                                            <span style={{ 
+                                              fontSize: "0.75rem",
+                                              color: "#94A3B8",
+                                              textTransform: "uppercase",
+                                              letterSpacing: "0.05em"
+                                            }}>
+                                              Standard Rate
+                                            </span>
+                                            <span style={{ 
+                                              fontSize: "1.25rem", 
+                                              fontWeight: "700",
+                                              color: "#10B981" 
+                                            }}>
+                                              ${typeof service.standardRate === 'number' ? 
+                                                service.standardRate.toFixed(2) : 
+                                                service.standardRate?.replace(/[^0-9.]/g, '') || '0.00'}
+                                            </span>
+                                            <span style={{ fontSize: "0.75rem", color: "#94A3B8" }}>
+                                              {service.rateType || 'Medicare Fee Schedule'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        
+                                        {/* Potential savings */}
                                           {(typeof service.potentialSavings === 'number' && service.potentialSavings > 0) && (
-                                            <p style={{ marginTop: "0.5rem", color: "#10B981" }}>
-                                              Potential Savings: ${service.potentialSavings.toFixed(2)} 
+                                          <div style={{
+                                            marginTop: "1rem",
+                                            paddingTop: "1rem",
+                                            borderTop: "1px solid rgba(59, 130, 246, 0.1)"
+                                          }}>
+                                            <span style={{ 
+                                              fontSize: "0.75rem",
+                                              color: "#94A3B8",
+                                              textTransform: "uppercase",
+                                              letterSpacing: "0.05em",
+                                              display: "block",
+                                              marginBottom: "0.25rem"
+                                            }}>
+                                              Potential Savings
+                                            </span>
+                                            <div style={{ 
+                                              fontSize: "1.25rem", 
+                                              fontWeight: "700",
+                                              color: "#10B981",
+                                              display: "flex",
+                                              alignItems: "baseline",
+                                              gap: "0.5rem"
+                                            }}>
+                                              ${service.potentialSavings.toFixed(2)}
+                                              <span style={{ fontSize: "0.875rem", fontWeight: "500" }}>
                                               ({typeof service.amount === 'number' ? 
                                                 ((service.potentialSavings / service.amount) * 100).toFixed(1) : 
                                                 ((service.potentialSavings / parseFloat(service.amount?.replace(/[^0-9.]/g, '') || '0')) * 100).toFixed(1)}%)
-                                            </p>
-                                          )}
+                                              </span>
                                         </div>
+                                            
+                                            <div style={{
+                                              height: "0.5rem",
+                                              background: "rgba(16, 185, 129, 0.1)",
+                                              borderRadius: "1rem",
+                                              overflow: "hidden",
+                                              marginTop: "0.5rem"
+                                            }}>
+                                              <div style={{
+                                                height: "100%",
+                                                background: "#10B981",
+                                                borderRadius: "1rem",
+                                                width: `${Math.min(((service.potentialSavings / parseFloat(service.amount?.replace(/[^0-9.]/g, '') || '0')) * 100), 100)}%`
+                                              }}></div>
                                       </div>
                                     </div>
                                   )}
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1455,7 +1762,8 @@ export default function BillAnalysis() {
                               background: "rgba(15, 23, 42, 0.5)",
                               borderRadius: "0.75rem",
                               padding: "1rem",
-                              border: "1px solid rgba(59, 130, 246, 0.15)"
+                              border: "1px solid rgba(59, 130, 246, 0.15)",
+                              marginTop: "-2rem" // Much larger negative margin to pull it extremely close to AI Reasoning
                             }}>
                               {/* Billed amount - updated for consistent styling */}
                               <div style={{
@@ -2010,10 +2318,20 @@ export default function BillAnalysis() {
               <h2 style={{
                 fontSize: "1.5rem",
                 fontWeight: "600",
-                marginBottom: "1.5rem"
-              }}>Patient Information</h2>
+                marginBottom: "1.5rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.75rem"
+              }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                Patient Information
+              </h2>
               
               <div style={{ display: "grid", gap: "1rem" }}>
+                {/* Name */}
                 <div style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 2fr",
@@ -2027,10 +2345,12 @@ export default function BillAnalysis() {
                   <div>
                     {extractedData?.patientInfo?.fullName || 
                      extractedData?.patientInfo?.name || 
-                     (extractedData?.rawEnhancedData?.patientInfo?.name) || 
+                     extractedData?.rawEnhancedData?.patientInfo?.name || 
                      '-'}
                   </div>
                 </div>
+                
+                {/* DOB */}
                 <div style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 2fr",
@@ -2040,7 +2360,7 @@ export default function BillAnalysis() {
                   borderRadius: "0.5rem",
                   border: "1px solid #334155"
                 }}>
-                  <div style={{ color: "#94A3B8" }}>DOB</div>
+                  <div style={{ color: "#94A3B8" }}>Date of Birth</div>
                   <div>
                     {extractedData?.patientInfo?.dateOfBirth || 
                      extractedData?.patientInfo?.dob || 
@@ -2048,6 +2368,8 @@ export default function BillAnalysis() {
                      '-'}
                   </div>
                 </div>
+                
+                {/* Account Number */}
                 <div style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 2fr",
@@ -2057,7 +2379,7 @@ export default function BillAnalysis() {
                   borderRadius: "0.5rem",
                   border: "1px solid #334155"
                 }}>
-                  <div style={{ color: "#94A3B8" }}>Account</div>
+                  <div style={{ color: "#94A3B8" }}>Account Number</div>
                   <div>
                     {extractedData?.patientInfo?.accountNumber || 
                      extractedData?.patientInfo?.account_number || 
@@ -2065,6 +2387,141 @@ export default function BillAnalysis() {
                      '-'}
                   </div>
                 </div>
+                
+                {/* Patient ID */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Patient ID</div>
+                  <div>
+                    {extractedData?.patientInfo?.patientId || 
+                     extractedData?.patientInfo?.patient_id || 
+                     extractedData?.patientInfo?.id ||
+                     '-'}
+              </div>
+            </div>
+                
+                {/* Address */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Address</div>
+                  <div>
+                    {extractedData?.patientInfo?.address || 
+                     extractedData?.patientInfo?.addressLine1 ||
+                     extractedData?.patientInfo?.address_line1 ||
+                     '-'}
+                    {(extractedData?.patientInfo?.addressLine2 || 
+                      extractedData?.patientInfo?.address_line2) && 
+                      <div>{extractedData?.patientInfo?.addressLine2 || 
+                            extractedData?.patientInfo?.address_line2}</div>}
+                    {(extractedData?.patientInfo?.city || 
+                      extractedData?.patientInfo?.state || 
+                      extractedData?.patientInfo?.zipCode) && 
+                      <div>
+                        {extractedData?.patientInfo?.city || ''}{extractedData?.patientInfo?.city ? ', ' : ''}
+                        {extractedData?.patientInfo?.state || ''} {extractedData?.patientInfo?.zipCode || 
+                                                                   extractedData?.patientInfo?.zip_code || 
+                                                                   extractedData?.patientInfo?.zip || ''}
+                      </div>}
+                  </div>
+                </div>
+                
+                {/* Phone */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Phone</div>
+                  <div>
+                    {extractedData?.patientInfo?.phone || 
+                     extractedData?.patientInfo?.phoneNumber || 
+                     extractedData?.patientInfo?.phone_number ||
+                     '-'}
+                  </div>
+                </div>
+                
+                {/* Insurance Information */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 2fr",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "#0F172A",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #334155"
+                }}>
+                  <div style={{ color: "#94A3B8" }}>Insurance</div>
+                  <div>
+                    {extractedData?.patientInfo?.insuranceInfo || 
+                     extractedData?.patientInfo?.insurance || 
+                     extractedData?.insuranceInfo?.provider ||
+                     extractedData?.insuranceInfo?.name ||
+                     '-'}
+                    {extractedData?.insuranceInfo?.policyNumber && 
+                      <div style={{ marginTop: "0.25rem", fontSize: "0.875rem", color: "#94A3B8" }}>
+                        Policy: {extractedData.insuranceInfo.policyNumber}
+                      </div>}
+                    {extractedData?.insuranceInfo?.groupNumber && 
+                      <div style={{ fontSize: "0.875rem", color: "#94A3B8" }}>
+                        Group: {extractedData.insuranceInfo.groupNumber}
+                      </div>}
+                  </div>
+                </div>
+                
+                {/* Insurance Coverage */}
+                {(extractedData?.insuranceInfo?.amountCovered || 
+                  extractedData?.insuranceInfo?.patientResponsibility || 
+                  extractedData?.insuranceInfo?.adjustments) && (
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 2fr",
+                    gap: "1rem",
+                    padding: "1rem",
+                    background: "#0F172A",
+                    borderRadius: "0.5rem",
+                    border: "1px solid #334155"
+                  }}>
+                    <div style={{ color: "#94A3B8" }}>Coverage Details</div>
+                    <div style={{ display: "grid", gap: "0.5rem" }}>
+                      {extractedData?.insuranceInfo?.amountCovered && (
+                        <div>
+                          <span style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Amount Covered: </span>
+                          ${extractedData.insuranceInfo.amountCovered}
+                        </div>
+                      )}
+                      {extractedData?.insuranceInfo?.patientResponsibility && (
+                        <div>
+                          <span style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Patient Responsibility: </span>
+                          ${extractedData.insuranceInfo.patientResponsibility}
+                        </div>
+                      )}
+                      {extractedData?.insuranceInfo?.adjustments && (
+                        <div>
+                          <span style={{ color: "#94A3B8", fontSize: "0.875rem" }}>Adjustments: </span>
+                          ${extractedData.insuranceInfo.adjustments}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

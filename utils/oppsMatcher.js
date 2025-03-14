@@ -19,69 +19,113 @@ async function matchServiceToOPPS(service, additionalContext = {}) {
   try {
     console.log(`[OPPS_MATCHER] Starting OPPS matching for: "${service.description}"`);
     
-    // Extract the code if available
-    const code = service.code || extractCodeFromDescription(service.description);
-    
-    if (code) {
-      console.log(`[OPPS_MATCHER] Using code for lookup: ${code}`);
-      
-      // Look up the code in the OPPS database
-      const oppsMatch = await lookupOPPSCode(code);
-      
-      if (oppsMatch) {
-        console.log(`[OPPS_MATCHER] Found direct match in OPPS database: ${code}`);
-        return {
-          ...oppsMatch,
-          matchMethod: 'direct_code_match'
-        };
-      } else {
-        console.log(`[OPPS_MATCHER] Code ${code} not found in OPPS database`);
-      }
+    // Extract the code if available (we'll use this for confirmation later)
+    const extractedCode = service.code || extractCodeFromDescription(service.description);
+    if (extractedCode) {
+      console.log(`[OPPS_MATCHER] Extracted code from service: ${extractedCode}`);
     }
     
-    // If no code or code not found, try matching by description
-    console.log(`[OPPS_MATCHER] Attempting to match by description: "${service.description}"`);
-    
-    // Try keyword matching first
-    const keywordMatch = await findMatchByKeywords(service.description);
-    
-    if (keywordMatch && keywordMatch.confidence > 0.7) {
-      console.log(`[OPPS_MATCHER] Found keyword match: ${keywordMatch.code} (${keywordMatch.confidence.toFixed(2)})`);
-      return {
-        ...keywordMatch,
-        matchMethod: 'keyword_match'
-      };
-    }
-    
-    // If no good keyword match, try AI matching
-    console.log(`[OPPS_MATCHER] No strong keyword match found, trying AI matching`);
+    // STEP 1: Use OpenAI as the first line of defense
+    console.log(`[OPPS_MATCHER] Using OpenAI as primary matcher for: "${service.description}"`);
     const aiMatch = await findMatchWithOpenAI(service, additionalContext);
     
     if (aiMatch) {
-      console.log(`[OPPS_MATCHER] Found AI match: ${aiMatch.code}`);
+      console.log(`[OPPS_MATCHER] OpenAI suggested code: ${aiMatch.code} with confidence: ${aiMatch.confidence.toFixed(2)}`);
       
-      // Verify the AI match against the database
+      // STEP 2: If AI confidence is high (≥70%), use it directly
+      if (aiMatch.confidence >= 0.7) {
+        console.log(`[OPPS_MATCHER] High confidence AI match (${aiMatch.confidence.toFixed(2)}), using directly`);
+        
+        // Verify the AI match against the database
+        const verifiedMatch = await lookupOPPSCode(aiMatch.code);
+        
+        if (verifiedMatch) {
+          console.log(`[OPPS_MATCHER] Verified AI match in database: ${verifiedMatch.code}`);
+          
+          // If we have an extracted code, check if it matches the AI suggestion
+          if (extractedCode && extractedCode === aiMatch.code) {
+            console.log(`[OPPS_MATCHER] AI match confirmed by extracted code: ${extractedCode}`);
+            return {
+              ...verifiedMatch,
+              confidence: Math.max(aiMatch.confidence, 0.95), // Boost confidence due to code confirmation
+              reasoning: aiMatch.reasoning + " (Confirmed by extracted code)",
+              matchMethod: 'ai_match_code_confirmed'
+            };
+          }
+          
+          return {
+            ...verifiedMatch,
+            confidence: aiMatch.confidence,
+            reasoning: aiMatch.reasoning,
+            matchMethod: 'ai_match_primary'
+          };
+        } else {
+          console.log(`[OPPS_MATCHER] AI match ${aiMatch.code} not found in database, returning AI result only`);
+          return {
+            code: aiMatch.code,
+            description: service.description,
+            confidence: aiMatch.confidence,
+            reasoning: aiMatch.reasoning,
+            matchMethod: 'ai_match_unverified'
+          };
+        }
+      } else {
+        console.log(`[OPPS_MATCHER] Low confidence AI match (${aiMatch.confidence.toFixed(2)}), checking alternatives`);
+      }
+    } else {
+      console.log(`[OPPS_MATCHER] OpenAI failed to provide a match, falling back to code lookup`);
+    }
+    
+    // STEP 3: If AI confidence is low or AI failed, try using the extracted code
+    if (extractedCode) {
+      console.log(`[OPPS_MATCHER] Trying direct code lookup with extracted code: ${extractedCode}`);
+      const codeMatch = await lookupOPPSCode(extractedCode);
+      
+      if (codeMatch) {
+        console.log(`[OPPS_MATCHER] Found direct match in OPPS database: ${extractedCode}`);
+        return {
+          ...codeMatch,
+          matchMethod: 'direct_code_match'
+        };
+      } else {
+        console.log(`[OPPS_MATCHER] Extracted code ${extractedCode} not found in database`);
+      }
+    }
+    
+    // STEP 4: If we have a low-confidence AI match but nothing else worked, use it as fallback
+    if (aiMatch) {
+      console.log(`[OPPS_MATCHER] Using low confidence AI match as fallback: ${aiMatch.code} (${aiMatch.confidence.toFixed(2)})`);
+      
+      // Try to verify it against the database one more time
       const verifiedMatch = await lookupOPPSCode(aiMatch.code);
       
       if (verifiedMatch) {
-        console.log(`[OPPS_MATCHER] Verified AI match in database: ${verifiedMatch.code}`);
         return {
           ...verifiedMatch,
           confidence: aiMatch.confidence,
           reasoning: aiMatch.reasoning,
-          matchMethod: 'ai_match'
+          matchMethod: 'ai_match_fallback'
         };
-      } else {
-        console.log(`[OPPS_MATCHER] AI match ${aiMatch.code} not found in database`);
       }
+      
+      return {
+        code: aiMatch.code,
+        description: service.description,
+        confidence: aiMatch.confidence,
+        reasoning: aiMatch.reasoning,
+        matchMethod: 'ai_match_fallback_unverified'
+      };
     }
     
-    // If we have a low-confidence keyword match, return it as a fallback
+    // STEP 5: Last resort - try keyword matching
+    console.log(`[OPPS_MATCHER] All primary methods failed, attempting keyword matching`);
+    const keywordMatch = await findMatchByKeywords(service.description);
+    
     if (keywordMatch) {
-      console.log(`[OPPS_MATCHER] Using low confidence keyword match as fallback: ${keywordMatch.code} (${keywordMatch.confidence.toFixed(2)})`);
+      console.log(`[OPPS_MATCHER] Found keyword match: ${keywordMatch.code} (${keywordMatch.confidence.toFixed(2)})`);
       return {
         ...keywordMatch,
-        matchMethod: 'keyword_match_low_confidence'
+        matchMethod: 'keyword_match_last_resort'
       };
     }
     
@@ -240,10 +284,15 @@ async function findMatchWithOpenAI(service, additionalContext = {}) {
   try {
     console.log(`[OPPS_MATCHER] Finding match with OpenAI for: "${service.description}"`);
     
-    // Create a prompt for OpenAI
+    // Create a more robust prompt for OpenAI
     let prompt = `I need to find the most appropriate CPT/HCPCS code for this outpatient facility service:
 
 Service Description: "${service.description}"`;
+
+    // Add service code if available
+    if (service.code) {
+      prompt += `\nExtracted Code: ${service.code}`;
+    }
 
     // Add service category if available
     if (additionalContext.category) {
@@ -262,14 +311,29 @@ Service Description: "${service.description}"`;
     
     prompt += `\n\nThis is for the facility component (OPPS) of an outpatient procedure. Please provide the most appropriate CPT/HCPCS code that would be used for hospital outpatient billing.
 
+For outpatient facility services, consider the following:
+1. Surgical procedures (10000-69999) are common in outpatient settings
+2. Radiology services (70000-79999) often have facility components
+3. Medicine services (90000-99999) may have facility components
+4. HCPCS Level II codes (A-V codes) may be used for certain services and supplies
+
+Your task is to determine the most specific and accurate code that represents this service in an outpatient facility setting.
+
 Respond in JSON format with the following structure:
 {
   "code": "12345",
   "confidence": 0.95,
-  "reasoning": "Brief explanation of why this code is appropriate"
-}`;
+  "reasoning": "Detailed explanation of why this code is appropriate for this outpatient facility service"
+}
 
-    console.log('[OPPS_MATCHER] Calling OpenAI API for OPPS code matching');
+The confidence should reflect your certainty in the match, with values:
+- 0.9-1.0: Very high confidence (exact match)
+- 0.8-0.89: High confidence (strong match)
+- 0.7-0.79: Good confidence (likely match)
+- 0.5-0.69: Moderate confidence (possible match)
+- <0.5: Low confidence (uncertain match)`;
+
+    console.log('[OPPS_MATCHER] Calling OpenAI API for OPPS code matching with enhanced prompt');
     
     // Call OpenAI API
     const response = await openai.chat.completions.create({
@@ -277,7 +341,7 @@ Respond in JSON format with the following structure:
       messages: [
         { 
           role: 'system', 
-          content: 'You are a medical coding expert specializing in hospital outpatient billing and OPPS (Outpatient Prospective Payment System). Your task is to match service descriptions to the most appropriate CPT/HCPCS code for facility billing.' 
+          content: 'You are a medical coding expert specializing in hospital outpatient billing and OPPS (Outpatient Prospective Payment System). Your task is to match service descriptions to the most appropriate CPT/HCPCS code for facility billing. Be precise and consider the exact wording of the service description. Provide detailed reasoning for your code selection.' 
         },
         { role: 'user', content: prompt }
       ],

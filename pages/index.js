@@ -143,7 +143,7 @@ export default function Home() {
             justifyContent: 'center',
             marginBottom: '4rem'
           }}>
-            <a href="/signup" style={{textDecoration: 'none'}}>
+            <a href={user ? "/dashboard" : "/signup"} style={{textDecoration: 'none'}}>
               <button style={{
                 padding: "1.25rem 2.5rem",
                 fontSize: "1.1rem",

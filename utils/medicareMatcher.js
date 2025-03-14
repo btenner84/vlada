@@ -1,4 +1,10 @@
 import { adminDb } from '../firebase/admin';
+import { OpenAI } from 'openai';
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // Enhanced common Medicare rates with more specific codes and descriptions
 const commonMedicareRates = {
@@ -92,18 +98,190 @@ const serviceDescriptionMappings = {
 };
 
 /**
- * Look up a Medicare rate by CPT code
- * @param {string} cptCode - The CPT code to look up
- * @returns {Promise<Object|null>} - The Medicare rate information or null if not found
+ * Match a service to a Medicare rate
+ * @param {Object} service - The service to match
+ * @param {Object} additionalContext - Additional context about the service
+ * @returns {Promise<Object|null>} - The matched Medicare rate information
  */
-async function lookupMedicareRate(cptCode) {
+async function matchServiceToMedicare(service, additionalContext = {}) {
   try {
-    console.log(`[MEDICARE_MATCHER] Looking up Medicare rate for CPT code: ${cptCode}`);
+    console.log(`[MEDICARE_MATCHER] Starting Medicare rate matching for: "${service.description}"`);
+    
+    if (!service.description) {
+      console.log('[MEDICARE_MATCHER] No service description provided');
+      return {
+        matched: false,
+        reasoning: 'No service description provided'
+      };
+    }
+
+    // Extract the code if available (we'll use this for confirmation later)
+    const extractedCode = service.code || extractCodeFromDescription(service.description);
+    if (extractedCode) {
+      console.log(`[MEDICARE_MATCHER] Extracted code from service: ${extractedCode}`);
+    }
+
+    // STEP 1: Use OpenAI as the first line of defense
+    console.log(`[MEDICARE_MATCHER] Using OpenAI as primary matcher for: "${service.description}"`);
+    const aiMatch = await findMatchWithOpenAI(service, additionalContext);
+    
+    if (aiMatch) {
+      console.log(`[MEDICARE_MATCHER] OpenAI suggested code: ${aiMatch.code} with confidence: ${aiMatch.confidence.toFixed(2)}`);
+      
+      // STEP 2: If AI confidence is high (≥70%), use it directly
+      if (aiMatch.confidence >= 0.7) {
+        console.log(`[MEDICARE_MATCHER] High confidence AI match (${aiMatch.confidence.toFixed(2)}), using directly`);
+        
+        // Verify the AI match against the database
+        const rateInfo = await lookupMedicareRate(aiMatch.code);
+        
+        if (rateInfo) {
+          console.log(`[MEDICARE_MATCHER] Verified AI match in database: ${rateInfo.code}`);
+          
+          // If we have an extracted code, check if it matches the AI suggestion
+          if (extractedCode && extractedCode === aiMatch.code) {
+            console.log(`[MEDICARE_MATCHER] AI match confirmed by extracted code: ${extractedCode}`);
+            return {
+              matched: true,
+              ...rateInfo,
+              confidence: Math.max(aiMatch.confidence, 0.95), // Boost confidence due to code confirmation
+              reasoning: aiMatch.reasoning + " (Confirmed by extracted code)",
+              matchMethod: 'ai_match_code_confirmed'
+            };
+      }
+      
+      return {
+            matched: true,
+            ...rateInfo,
+            confidence: aiMatch.confidence,
+            reasoning: aiMatch.reasoning,
+            matchMethod: 'ai_match_primary'
+          };
+        } else {
+          console.log(`[MEDICARE_MATCHER] AI match ${aiMatch.code} not found in database, returning AI result only`);
+          return {
+            matched: true,
+            code: aiMatch.code,
+            description: aiMatch.suggestedDescription || service.description,
+            confidence: aiMatch.confidence * 0.9, // Slightly reduce confidence for unverified matches
+            reasoning: aiMatch.reasoning + " (Note: No rate data available for this code)",
+            matchMethod: 'ai_match_unverified',
+            nonFacilityRate: null,
+            facilityRate: null
+          };
+        }
+      } else {
+        console.log(`[MEDICARE_MATCHER] Low confidence AI match (${aiMatch.confidence.toFixed(2)}), checking alternatives`);
+      }
+    } else {
+      console.log(`[MEDICARE_MATCHER] OpenAI failed to provide a match, falling back to code lookup`);
+    }
+    
+    // STEP 3: If AI confidence is low or AI failed, try using the extracted code
+    if (extractedCode) {
+      console.log(`[MEDICARE_MATCHER] Trying direct code lookup with extracted code: ${extractedCode}`);
+      const rateInfo = await lookupMedicareRate(extractedCode);
+      
+      if (rateInfo) {
+        console.log(`[MEDICARE_MATCHER] Found direct match in Medicare database: ${extractedCode}`);
+        return {
+          matched: true,
+          ...rateInfo,
+          confidence: 0.95, // High confidence for direct code match
+          reasoning: `Direct match by code ${extractedCode}`,
+          matchMethod: 'direct_code_match'
+        };
+      } else {
+        console.log(`[MEDICARE_MATCHER] Extracted code ${extractedCode} not found in database`);
+      }
+    }
+    
+    // STEP 4: If we have a low-confidence AI match but nothing else worked, use it as fallback
+    if (aiMatch) {
+      console.log(`[MEDICARE_MATCHER] Using low confidence AI match as fallback: ${aiMatch.code} (${aiMatch.confidence.toFixed(2)})`);
+      
+      // Try to verify it against the database one more time
+      const rateInfo = await lookupMedicareRate(aiMatch.code);
+      
+      if (rateInfo) {
+        return {
+          matched: true,
+          ...rateInfo,
+          confidence: aiMatch.confidence,
+          reasoning: aiMatch.reasoning,
+          matchMethod: 'ai_match_fallback'
+        };
+      }
+      
+      return {
+        matched: true,
+        code: aiMatch.code,
+        description: aiMatch.suggestedDescription || service.description,
+        confidence: aiMatch.confidence * 0.8, // Reduce confidence for unverified fallback
+        reasoning: aiMatch.reasoning + " (Note: No rate data available for this code)",
+        matchMethod: 'ai_match_fallback_unverified',
+        nonFacilityRate: null,
+        facilityRate: null
+      };
+    }
+    
+    // STEP 5: Last resort - try category-specific matching
+    if (additionalContext.category) {
+      console.log(`[MEDICARE_MATCHER] Trying category-specific matching for: ${additionalContext.category}`);
+      
+      let categoryMatch = null;
+      
+      switch (additionalContext.category) {
+        case 'Office visits and Consultations':
+          categoryMatch = await matchOfficeVisit(service.description, service, additionalContext);
+          break;
+        case 'Hospital stays and emergency care visits':
+          categoryMatch = await matchEmergencyCare(service.description, service, additionalContext);
+          break;
+        default:
+          categoryMatch = await findMatchByDescription(service.description, additionalContext.category);
+      }
+      
+      if (categoryMatch) {
+        console.log(`[MEDICARE_MATCHER] Found category-specific match: ${categoryMatch.code}`);
+        return {
+          matched: true,
+          ...categoryMatch,
+          matchMethod: 'category_specific_match'
+        };
+      }
+    }
+    
+    console.log(`[MEDICARE_MATCHER] No match found for service: "${service.description}"`);
+    return {
+      matched: false,
+      confidence: 0,
+      reasoning: 'No matching Medicare rate found'
+    };
+    
+  } catch (error) {
+    console.error('[MEDICARE_MATCHER] Error in Medicare matching:', error);
+    return {
+      matched: false,
+      confidence: 0,
+      reasoning: `Error matching Medicare rate: ${error.message}`
+    };
+  }
+}
+
+/**
+ * Look up a Medicare rate by CPT code
+ * @param {string} code - The CPT code to look up
+ * @returns {Promise<Object|null>} - The Medicare rate information or null
+ */
+async function lookupMedicareRate(code) {
+  try {
+    console.log(`[MEDICARE_MATCHER] Looking up Medicare rate for code: ${code}`);
     
     // Check common Medicare rates first
-    if (commonMedicareRates[cptCode]) {
-      const data = commonMedicareRates[cptCode];
-      console.log(`[MEDICARE_MATCHER] Found common Medicare rate: ${cptCode}`, data);
+    if (commonMedicareRates[code]) {
+      const data = commonMedicareRates[code];
+      console.log(`[MEDICARE_MATCHER] Found common Medicare rate: ${code}`, data);
       return {
         code: data.code,
         description: data.description,
@@ -113,54 +291,35 @@ async function lookupMedicareRate(cptCode) {
       };
     }
     
-    // Check if adminDb is properly initialized
-    if (!adminDb) {
-      console.error('[MEDICARE_MATCHER] Firebase admin DB is not initialized');
-      return null;
+    // Try to find in Firestore
+    try {
+      if (adminDb) {
+        // First try medicareCodes collection
+        let docRef = await adminDb.collection('medicareCodes').doc(code).get();
+        
+        if (!docRef.exists) {
+          // If not found, try cptCodeMappings collection
+          docRef = await adminDb.collection('cptCodeMappings').doc(code).get();
+        }
+        
+        if (docRef.exists) {
+          const data = docRef.data();
+          console.log(`[MEDICARE_MATCHER] Found Medicare rate data in database:`, data);
+          return {
+            code: data.code,
+            description: data.description,
+            nonFacilityRate: data.nonFacilityRate || null,
+            facilityRate: data.facilityRate || null,
+            reasoning: 'Match from Medicare Fee Schedule database'
+          };
+        }
+      }
+    } catch (firestoreError) {
+      console.error('[MEDICARE_MATCHER] Firestore error:', firestoreError.message);
     }
     
-    // Try to find in Medicare codes collection
-    let docRef = await adminDb.collection('medicareCodes').doc(cptCode).get();
-    
-    if (!docRef.exists) {
-      console.log(`[MEDICARE_MATCHER] No Medicare rate found in medicareCodes collection for: ${cptCode}`);
-      
-      // If not found in Medicare collection, try CPT code mappings for office visits, procedures, etc.
-      docRef = await adminDb.collection('cptCodeMappings').doc(cptCode).get();
-      
-      if (!docRef.exists) {
-        console.log(`[MEDICARE_MATCHER] No Medicare rate found in cptCodeMappings for: ${cptCode}`);
-        return null;
-      }
-      
-      const cptData = docRef.data();
-      console.log('[MEDICARE_MATCHER] Found CPT code data:', cptData);
-      
-      // Check if we have reimbursement rates
-      if (!cptData.nonFacilityRate && !cptData.facilityRate) {
-        console.log(`[MEDICARE_MATCHER] CPT code ${cptCode} found but has no reimbursement rates`);
-        return null;
-      }
-      
-      return {
-        code: cptData.code,
-        description: cptData.description,
-        nonFacilityRate: cptData.nonFacilityRate || null,
-        facilityRate: cptData.facilityRate || null,
-        reasoning: 'Match from CPT code database'
-      };
-    }
-    
-    const data = docRef.data();
-    console.log('[MEDICARE_MATCHER] Found Medicare rate data:', data);
-    
-    return {
-      code: data.code,
-      description: data.description,
-      nonFacilityRate: data.nonFacilityRate,
-      facilityRate: data.facilityRate,
-      reasoning: 'Direct match from Medicare Fee Schedule'
-    };
+    console.log(`[MEDICARE_MATCHER] No Medicare rate found for code: ${code}`);
+    return null;
   } catch (error) {
     console.error('[MEDICARE_MATCHER] Error looking up Medicare rate:', error);
     return null;
@@ -168,456 +327,276 @@ async function lookupMedicareRate(cptCode) {
 }
 
 /**
- * Match a service to a Medicare rate
- * @param {Object} service - The service to match
- * @param {Object} context - Additional context about the service
- * @returns {Promise<Object|null>} - The matched Medicare rate information
+ * Extract a CPT code from a service description
+ * @param {string} description - The service description
+ * @returns {string|null} - The extracted code or null
  */
-async function matchServiceToMedicare(service, context = {}) {
-  try {
-    console.log('[MEDICARE_MATCHER] Starting Medicare rate matching for:', service.description);
-    
-    // If we have a CPT code, try to look it up directly
-    if (service.code && service.code !== 'Not found') {
-      const rateInfo = await lookupMedicareRate(service.code);
-      if (rateInfo) {
-        return {
-          ...rateInfo,
-          matchMethod: 'direct_code',
-          confidence: 0.95
-        };
-      }
-    }
-    
-    // If no direct match by code, try to find a match based on description
-    const normalizedDesc = service.description.toLowerCase().trim();
-    const category = context.category || '';
-    
-    // Step 1: Try direct service description mapping first (most reliable)
-    const directMatch = findDirectDescriptionMatch(normalizedDesc);
-    if (directMatch) {
-      console.log(`[MEDICARE_MATCHER] Found direct description match: ${directMatch.code}`);
-      const rateInfo = await lookupMedicareRate(directMatch.code);
-      if (rateInfo) {
-        return {
-          ...rateInfo,
-          matchMethod: 'direct_description_match',
-          confidence: 0.95,
-          reasoning: `Directly matched "${normalizedDesc}" to predefined service: ${directMatch.code}`
-        };
-      }
-    }
-    
-    // Step 2: Try database description matching
-    const descriptionMatch = await findMatchByDescription(normalizedDesc, category);
-    if (descriptionMatch) {
-      console.log(`[MEDICARE_MATCHER] Found match by description: ${descriptionMatch.code}`);
-      return {
-        ...descriptionMatch,
-        matchMethod: 'description_match',
-        confidence: descriptionMatch.confidence
-      };
-    }
-    
-    // Step 3: Use specialized logic for specific service categories
-    if (category === 'Office visits and Consultations') {
-      return await matchOfficeVisit(normalizedDesc, service, context);
-    } else if (category === 'Procedures and Surgeries') {
-      return await matchProcedure(normalizedDesc, service, context);
-    } else if (category === 'Hospital stays and emergency care visits') {
-      return await matchEmergencyCare(normalizedDesc, service, context);
-    }
-    
-    // If service category is specified but no match found yet, try generic category-based matching
-    if (category) {
-      console.log(`[MEDICARE_MATCHER] Trying generic category matching for: ${category}`);
-      
-      let defaultCode;
-      switch (category) {
-        case 'Office visits and Consultations':
-          defaultCode = '99213'; // Established patient, level 3
-          break;
-        case 'Procedures and Surgeries':
-          defaultCode = '36415'; // Routine venipuncture
-          break;
-        case 'Hospital stays and emergency care visits':
-          defaultCode = '99283'; // ER visit, moderate severity
-          break;
-        default:
-          defaultCode = null;
-      }
-      
-      if (defaultCode) {
-        console.log(`[MEDICARE_MATCHER] Using default code for category: ${defaultCode}`);
-        const rateInfo = await lookupMedicareRate(defaultCode);
-        if (rateInfo) {
-          return {
-            ...rateInfo,
-            matchMethod: 'category_default',
-            confidence: 0.7,
-            reasoning: `Used default code ${defaultCode} based on service category ${category}`
-          };
-        }
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    console.error('[MEDICARE_MATCHER] Error matching service to Medicare rate:', error);
-    return null;
-  }
-}
-
-/**
- * Find a direct match in the service description mappings
- * @param {string} normalizedDesc - The normalized service description
- * @returns {Object|null} - The matched service mapping or null if not found
- */
-function findDirectDescriptionMatch(normalizedDesc) {
-  // First try exact match
-  if (serviceDescriptionMappings[normalizedDesc]) {
-    return {
-      ...serviceDescriptionMappings[normalizedDesc],
-      confidence: 1.0
-    };
-  }
+function extractCodeFromDescription(description) {
+  if (!description) return null;
   
-  // Try partial matches
-  for (const [key, mapping] of Object.entries(serviceDescriptionMappings)) {
-    if (normalizedDesc.includes(key)) {
-      return {
-        ...mapping,
-        confidence: 0.9
-      };
-    }
-  }
+  // Look for patterns like "CPT: 99213" or just "99213"
+  const codePatterns = [
+    /CPT:?\s*(\d{5})/i,
+    /Code:?\s*(\d{5})/i,
+    /\s(\d{5})\s/,
+    /^(\d{5})$/,
+    /\s(\d{5})$/,
+    /(\d{5})/
+  ];
   
-  // Check for word-by-word matches with high-value terms
-  const words = normalizedDesc.split(/\s+/);
-  const highValueMatches = [];
-  
-  for (const [key, mapping] of Object.entries(serviceDescriptionMappings)) {
-    const keyWords = key.split(/\s+/);
-    let matchCount = 0;
-    
-    for (const word of words) {
-      if (word.length <= 2) continue; // Skip very short words
-      if (keyWords.includes(word)) {
-        matchCount++;
+  for (const pattern of codePatterns) {
+    const match = description.match(pattern);
+    if (match && match[1]) {
+      const code = match[1];
+      // Validate code range for E&M codes
+      if ((code >= '99201' && code <= '99499') || 
+          (code >= '10000' && code <= '69999') || // Surgery
+          (code >= '70000' && code <= '79999') || // Radiology
+          (code >= '80000' && code <= '89999') || // Lab
+          (code >= '90000' && code <= '99099') || // Medicine
+          (code >= '99100' && code <= '99499')) { // E&M
+        return code;
       }
     }
-    
-    // If more than half of words match, consider it a potential match
-    if (matchCount > 0 && matchCount >= Math.ceil(keyWords.length / 2)) {
-      highValueMatches.push({
-        ...mapping,
-        matchKey: key,
-        confidence: 0.7 + (0.2 * (matchCount / keyWords.length))
-      });
-    }
-  }
-  
-  // If we have high-value matches, return the one with highest confidence
-  if (highValueMatches.length > 0) {
-    highValueMatches.sort((a, b) => b.confidence - a.confidence);
-    return highValueMatches[0];
   }
   
   return null;
 }
 
 /**
+ * Find a match using OpenAI's semantic understanding
+ * @param {Object} service - The service object
+ * @param {Object} additionalContext - Additional context about the service
+ * @returns {Promise<Object|null>} - The matched Medicare rate information or null
+ */
+async function findMatchWithOpenAI(service, additionalContext = {}) {
+  try {
+    console.log(`[MEDICARE_MATCHER] Finding match with OpenAI for: "${service.description}"`);
+    
+    // Create a robust prompt for OpenAI
+    let prompt = `I need to find the most appropriate CPT code and Medicare rate for this medical service:
+
+Service Description: "${service.description}"`;
+
+    // Add service code if available
+    if (service.code) {
+      prompt += `\nExtracted Code: ${service.code}`;
+    }
+
+    // Add service category if available
+    if (additionalContext.category) {
+      prompt += `\nService Category: ${additionalContext.category}`;
+    }
+
+    // Add patient information if available
+    if (additionalContext.patientAge) {
+      prompt += `\nPatient Age: ${additionalContext.patientAge}`;
+    }
+    
+    // Add facility type if available
+    if (additionalContext.facilityType) {
+      prompt += `\nFacility Type: ${additionalContext.facilityType}`;
+    }
+    
+    // Add patient type if available
+    if (additionalContext.patientType) {
+      prompt += `\nPatient Type: ${additionalContext.patientType}`;
+    }
+    
+    prompt += `\n\nThis is for Medicare rate determination. Please provide the most appropriate CPT code that would be used for billing this service.
+
+For medical services, consider the following:
+1. E&M codes (99201-99499) for office visits and consultations
+2. Surgery codes (10000-69999) for procedures
+3. Consider the level of service (minimal, low, moderate, high)
+4. Consider if this is a new or established patient
+5. Consider the setting (office, hospital, emergency department)
+6. Consider the complexity and time spent
+
+Your task is to determine the most specific and accurate code that represents this medical service.
+
+Respond in JSON format with the following structure:
+{
+  "code": "99213",
+  "suggestedDescription": "Standard description of the service",
+  "confidence": 0.95,
+  "reasoning": "Detailed explanation of why this code is appropriate"
+}
+
+The confidence should reflect your certainty in the match, with values:
+- 0.9-1.0: Very high confidence (exact match)
+- 0.8-0.89: High confidence (strong match)
+- 0.7-0.79: Good confidence (likely match)
+- 0.5-0.69: Moderate confidence (possible match)
+- <0.5: Low confidence (uncertain match)`;
+
+    console.log('[MEDICARE_MATCHER] Calling OpenAI API for CPT code matching');
+    
+    // Call OpenAI API
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4-turbo',
+      messages: [
+        { 
+          role: 'system', 
+          content: 'You are a medical coding expert specializing in CPT codes and Medicare rates. Your task is to match service descriptions to the most appropriate CPT code. Be precise and consider the level of service, setting, and complexity. Provide detailed reasoning for your code selection.' 
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" }
+    });
+    
+    // Parse the response
+    const result = JSON.parse(response.choices[0].message.content);
+    console.log('[MEDICARE_MATCHER] OpenAI response:', JSON.stringify(result, null, 2));
+    
+    // Validate the CPT code format (5 digits)
+    const isValidCode = /^\d{5}$/.test(result.code);
+    
+    if (!isValidCode) {
+      console.warn('[MEDICARE_MATCHER] OpenAI returned invalid CPT code format:', result.code);
+  return null;
+    }
+    
+    return {
+      code: result.code,
+      suggestedDescription: result.suggestedDescription,
+      confidence: result.confidence || 0.8,
+      reasoning: result.reasoning || 'Matched using AI'
+    };
+  } catch (error) {
+    console.error('[MEDICARE_MATCHER] Error finding match with OpenAI:', error);
+    return null;
+  }
+}
+
+/**
  * Match office visit with appropriate E&M code
- * @param {string} normalizedDesc - The normalized service description
+ * @param {string} description - The service description
  * @param {Object} service - The original service object
  * @param {Object} context - Additional context
  * @returns {Promise<Object|null>} - The matched Medicare rate information
  */
-async function matchOfficeVisit(normalizedDesc, service, context) {
+async function matchOfficeVisit(description, service, context) {
+  try {
   console.log('[MEDICARE_MATCHER] Matching office visit or consultation');
+    
+    const normalizedDesc = description.toLowerCase();
   
   // Determine if this is a preventive visit
   const isPreventive = 
     normalizedDesc.includes('preventive') || 
     normalizedDesc.includes('annual') || 
     normalizedDesc.includes('physical') ||
-    normalizedDesc.includes('wellness') ||
-    normalizedDesc.includes('check up') ||
-    normalizedDesc.includes('checkup');
+      normalizedDesc.includes('wellness');
   
-  // Check for new or established patient keywords
-  const isNewPatient = normalizedDesc.includes('new patient') || 
+    // Check for new or established patient
+    const isNewPatient = 
+      normalizedDesc.includes('new patient') || 
                        normalizedDesc.includes('new visit') || 
-                       normalizedDesc.includes('initial visit');
+      context.patientType === 'new';
   
-  // Determine complexity/level based on description
+    // Determine complexity/level
   let level = 3; // Default to level 3 (moderate)
   
   if (normalizedDesc.includes('comprehensive') || 
       normalizedDesc.includes('complex') || 
-      normalizedDesc.includes('detailed') ||
-      normalizedDesc.includes('high') ||
-      normalizedDesc.includes('level 4') ||
-      normalizedDesc.includes('level 5') ||
-      normalizedDesc.includes('full')) {
-    level = normalizedDesc.includes('highest') ? 5 : 4;
-  } else if (normalizedDesc.includes('basic') || 
-             normalizedDesc.includes('brief') || 
-             normalizedDesc.includes('level 1') ||
-             normalizedDesc.includes('level 2')) {
-    level = normalizedDesc.includes('minimal') ? 1 : 2;
-  }
-  
-  // Determine the appropriate code based on the criteria
-  let officeVisitCode;
-  
+        normalizedDesc.includes('detailed')) {
+      level = 4;
+    } else if (normalizedDesc.includes('extended') || 
+               normalizedDesc.includes('highest') || 
+               normalizedDesc.includes('severe')) {
+      level = 5;
+    } else if (normalizedDesc.includes('brief') || 
+               normalizedDesc.includes('limited')) {
+      level = 2;
+    } else if (normalizedDesc.includes('minimal')) {
+      level = 1;
+    }
+    
+    // Determine the appropriate code
+    let code;
   if (isPreventive) {
-    // Use preventive visit codes
-    if (isNewPatient) {
-      officeVisitCode = level >= 4 ? '99386' : '99385'; // New patient preventive
+      code = isNewPatient ? '99385' : '99395';
     } else {
-      officeVisitCode = level >= 4 ? '99396' : '99395'; // Established patient preventive
+      code = isNewPatient ? `9920${level}` : `9921${level}`;
     }
-  } else {
-    // Use regular E&M codes
-    if (isNewPatient) {
-      // New patient codes: 99201-99205
-      officeVisitCode = `9920${level}`;
-    } else {
-      // Established patient codes: 99211-99215
-      officeVisitCode = `9921${level}`;
-    }
-  }
-  
-  console.log(`[MEDICARE_MATCHER] Using office visit code: ${officeVisitCode} (level: ${level}, new patient: ${isNewPatient}, preventive: ${isPreventive})`);
-  
-  const rateInfo = await lookupMedicareRate(officeVisitCode);
+    
+    // Look up the rate
+    const rateInfo = await lookupMedicareRate(code);
   if (rateInfo) {
     return {
       ...rateInfo,
-      matchMethod: 'office_visit_pattern',
-      confidence: 0.85
+        confidence: 0.85,
+        reasoning: `Matched as ${isNewPatient ? 'new' : 'established'} patient ${isPreventive ? 'preventive' : ''} visit, level ${level}`,
+        matchMethod: 'office_visit_pattern'
     };
   }
   
   return null;
+  } catch (error) {
+    console.error('[MEDICARE_MATCHER] Error matching office visit:', error);
+    return null;
+  }
 }
 
 /**
  * Match emergency care service
- * @param {string} normalizedDesc - The normalized service description
+ * @param {string} description - The service description
  * @param {Object} service - The original service object
  * @param {Object} context - Additional context
  * @returns {Promise<Object|null>} - The matched Medicare rate information
  */
-async function matchEmergencyCare(normalizedDesc, service, context) {
+async function matchEmergencyCare(description, service, context) {
+  try {
   console.log('[MEDICARE_MATCHER] Matching emergency care service');
   
-  // Determine severity level for emergency visit
-  let severityCode;
-  if (normalizedDesc.includes('highest') || 
-      normalizedDesc.includes('critical') || 
-      normalizedDesc.includes('severe')) {
-    severityCode = '99285';
-  } else if (normalizedDesc.includes('high')) {
-    severityCode = '99284';
-  } else {
-    severityCode = '99283';
-  }
-  
-  const rateInfo = await lookupMedicareRate(severityCode);
-  if (rateInfo) {
-    return {
-      ...rateInfo,
-      matchMethod: 'emergency_visit_pattern',
-      confidence: 0.9
-    };
-  }
-  
-  return null;
-}
-
-/**
- * Match procedure or surgery
- * @param {string} normalizedDesc - The normalized service description
- * @param {Object} service - The original service object
- * @param {Object} context - Additional context
- * @returns {Promise<Object|null>} - The matched Medicare rate information
- */
-async function matchProcedure(normalizedDesc, service, context) {
-  console.log('[MEDICARE_MATCHER] Matching procedure or surgery');
-  
-  // Try to find a database match for the procedure
-  const dbMatch = await findMatchByDescription(normalizedDesc, 'Procedures and Surgeries');
-  if (dbMatch) {
-    return {
-      ...dbMatch,
-      matchMethod: 'procedure_description_match',
-      confidence: dbMatch.confidence
-    };
-  }
-  
-  // IV services
-  if (normalizedDesc.includes('iv push') || normalizedDesc.includes('intravenous push')) {
-    const isInitial = normalizedDesc.includes('initial') || !normalizedDesc.includes('additional');
-    const code = isInitial ? '96374' : '96375';
+    const normalizedDesc = description.toLowerCase();
     
+    // Determine severity level
+    let code = '99283'; // Default to moderate severity
+    
+    if (normalizedDesc.includes('critical') || 
+        normalizedDesc.includes('severe') || 
+        normalizedDesc.includes('highest')) {
+      code = '99285';
+    } else if (normalizedDesc.includes('high') || 
+               normalizedDesc.includes('complex')) {
+      code = '99284';
+    }
+    
+    // Look up the rate
     const rateInfo = await lookupMedicareRate(code);
     if (rateInfo) {
       return {
         ...rateInfo,
-        matchMethod: 'iv_procedure_pattern',
-        confidence: 0.9
-      };
-    }
-  }
-  
-  // Use a default procedure code if no specific match
-  const defaultCode = '36415'; // Routine venipuncture as default
-  const rateInfo = await lookupMedicareRate(defaultCode);
-  
-  if (rateInfo) {
-    return {
-      ...rateInfo,
-      matchMethod: 'procedure_default',
-      confidence: 0.6,
-      reasoning: 'Using default procedure code'
+        confidence: 0.85,
+        reasoning: `Matched as emergency department visit with ${code === '99285' ? 'highest' : code === '99284' ? 'high' : 'moderate'} severity`,
+        matchMethod: 'emergency_care_pattern'
     };
   }
   
   return null;
+  } catch (error) {
+    console.error('[MEDICARE_MATCHER] Error matching emergency care:', error);
+    return null;
+  }
 }
 
 /**
- * Calculate string similarity score between two strings
- * With focus on medical terminology and key words in CPT descriptions
- * @param {string} str1 - First string (service description)
- * @param {string} str2 - Second string (CPT code description)
- * @returns {number} - Similarity score between 0 and 1
- */
-function calculateStringSimilarity(str1, str2) {
-  // Convert both strings to lowercase and trim whitespace
-  const s1 = str1.toLowerCase().trim();
-  const s2 = str2.toLowerCase().trim();
-  
-  // Check for exact match
-  if (s1 === s2) return 1.0;
-  
-  // Check if one contains the other completely
-  if (s1.includes(s2)) return 0.95;
-  if (s2.includes(s1)) return 0.9;
-  
-  // Split into words and normalize
-  const words1 = s1.split(/\s+/).filter(w => w.length > 2);
-  const words2 = s2.split(/\s+/).filter(w => w.length > 2);
-  
-  // Common medical stopwords to ignore
-  const stopWords = ['and', 'with', 'without', 'the', 'for', 'or', 'by', 'to', 'in', 'of'];
-  
-  // Important medical terms that should have higher weight if matched
-  const importantTerms = [
-    'evaluation', 'management', 'consultation', 'emergency', 'critical', 'comprehensive',
-    'detailed', 'expanded', 'problem', 'focused', 'office', 'outpatient', 'inpatient', 
-    'hospital', 'initial', 'subsequent', 'follow', 'established', 'new', 'patient',
-    'visit', 'procedure', 'therapy', 'injection', 'infusion', 'diagnostic', 'test',
-    'lab', 'laboratory', 'imaging', 'scan', 'mri', 'ct', 'x-ray', 'ultrasound',
-    'check', 'checkup', 'physical', 'annual', 'complete', 'ear', 'throat', 'full'
-  ];
-  
-  // Filter out stopwords
-  const filteredWords1 = words1.filter(w => !stopWords.includes(w));
-  const filteredWords2 = words2.filter(w => !stopWords.includes(w));
-  
-  if (filteredWords1.length === 0 || filteredWords2.length === 0) {
-    return 0.1; // Not enough significant words to compare
-  }
-  
-  // Count matching words with weighted importance
-  let totalWeight = 0;
-  let matchWeight = 0;
-  
-  for (const word1 of filteredWords1) {
-    // Determine word weight - important terms are weighted higher
-    const wordWeight = importantTerms.includes(word1) ? 2.0 : 1.0;
-    totalWeight += wordWeight;
-    
-    let bestWordMatch = 0;
-    
-    for (const word2 of filteredWords2) {
-      // Exact match
-      if (word1 === word2) {
-        bestWordMatch = 1.0;
-        break;
-      }
-      
-      // One word contains the other (e.g., "cardio" in "cardiovascular")
-      if (word1.length > 4 && word2.includes(word1)) {
-        bestWordMatch = Math.max(bestWordMatch, 0.9);
-        continue;
-      }
-      
-      if (word2.length > 4 && word1.includes(word2)) {
-        bestWordMatch = Math.max(bestWordMatch, 0.8);
-        continue;
-      }
-      
-      // Check for partial match (prefix/suffix)
-      if (word1.length > 4 && word2.length > 4) {
-        // Check if they share a significant prefix
-        const prefixLength = Math.min(word1.length, word2.length) - 2;
-        if (word1.substring(0, prefixLength) === word2.substring(0, prefixLength)) {
-          bestWordMatch = Math.max(bestWordMatch, 0.7);
-          continue;
-        }
-        
-        // Check for common medical word stems
-        const medicalStems = ['cardi', 'neuro', 'gastro', 'arthro', 'endo', 'hyper', 'hypo', 'check', 'phys', 'exam'];
-        for (const stem of medicalStems) {
-          if (word1.includes(stem) && word2.includes(stem)) {
-            bestWordMatch = Math.max(bestWordMatch, 0.6);
-            break;
-          }
-        }
-      }
-    }
-    
-    matchWeight += wordWeight * bestWordMatch;
-  }
-  
-  // Calculate weighted similarity score
-  if (totalWeight === 0) return 0;
-  const similarityScore = matchWeight / totalWeight;
-  
-  // For short descriptions, boost the score if many words match
-  if (filteredWords1.length <= 3 && similarityScore > 0.7) {
-    return Math.min(1.0, similarityScore + 0.1);
-  }
-  
-  return similarityScore;
-}
-
-/**
- * Find match by description in the CPT database
- * @param {string} serviceDescription - The normalized service description
+ * Find match by description in the database
+ * @param {string} description - The service description
  * @param {string} category - The service category
- * @returns {Promise<Object|null>} - The matched Medicare rate information or null
+ * @returns {Promise<Object|null>} - The matched Medicare rate information
  */
-async function findMatchByDescription(serviceDescription, category) {
+async function findMatchByDescription(description, category) {
   try {
-    console.log(`[MEDICARE_MATCHER] Finding match by description for: "${serviceDescription}"`);
+    console.log(`[MEDICARE_MATCHER] Finding match by description for: "${description}"`);
     
-    // Check if adminDb is properly initialized
-    if (!adminDb) {
-      console.error('[MEDICARE_MATCHER] Firebase admin DB is not initialized');
-      return null;
-    }
+    const normalizedDesc = description.toLowerCase();
     
-    // First try direct search in medicareCodes collection
-    let descMatches = [];
-    
-    // Get code pattern for the category if available
+    // Get code range for category
     let codeRange = null;
-    if (category) {
       switch (category) {
         case 'Office visits and Consultations':
           codeRange = { start: '99201', end: '99499' };
@@ -628,109 +607,43 @@ async function findMatchByDescription(serviceDescription, category) {
         case 'Hospital stays and emergency care visits':
           codeRange = { start: '99217', end: '99288' };
           break;
-        case 'Lab and Diagnostic Tests':
-          codeRange = { start: '70000', end: '89999' };
+      default:
           break;  
-        default:
-          codeRange = null;
-      }
     }
     
-    // Extract key words from service description for search
-    const words = serviceDescription.split(/\s+/)
-      .filter(word => word.length > 3)  // Only use words with more than 3 characters
-      .filter(word => !['with', 'without', 'and', 'the', 'for', 'not'].includes(word.toLowerCase()))
-      .slice(0, 3);  // Use at most 3 key words
+    // Query the database
+    let query = adminDb.collection('medicareCodes');
+    if (codeRange) {
+      query = query.where('code', '>=', codeRange.start)
+                  .where('code', '<=', codeRange.end);
+    }
     
-    console.log(`[MEDICARE_MATCHER] Using key words for description search:`, words);
+    const snapshot = await query.limit(20).get();
     
-    if (words.length === 0) {
-      console.log('[MEDICARE_MATCHER] No significant words found in description for search');
-      words.push(...serviceDescription.split(/\s+/).filter(w => w.length > 2).slice(0, 2));
-      
-      if (words.length === 0) {
+    if (snapshot.empty) {
         return null;
-      }
     }
     
-    try {
-      // Try to get a snapshot from medicareCodes first with basic query
-      const medicareSnapshot = await adminDb.collection('medicareCodes')
-        .limit(10)
-        .get();
-        
-      if (!medicareSnapshot.empty) {
-        medicareSnapshot.forEach(doc => {
+    // Score matches
+    const matches = [];
+    snapshot.forEach(doc => {
           const data = doc.data();
-          
-          if (!data.description) return;
-          
-          const similarity = calculateStringSimilarity(serviceDescription, data.description);
-          
-          if (similarity >= 0.6) {
-            descMatches.push({
-              code: data.code,
-              description: data.description,
-              confidence: similarity,
-              nonFacilityRate: data.nonFacilityRate || null,
-              facilityRate: data.facilityRate || null,
-            });
-          }
-        });
-      }
-    } catch (error) {
-      console.log('[MEDICARE_MATCHER] Error querying medicareCodes collection:', error);
-    }
-    
-    // If no matches in medicareCodes, try cptCodeMappings
-    if (descMatches.length === 0) {
-      try {
-        // Build a query for cptCodeMappings
-        let cptQuery = adminDb.collection('cptCodeMappings');
-        
-        // If we have a code range, add it to the query
-        if (codeRange) {
-          cptQuery = cptQuery.where('code', '>=', codeRange.start)
-                             .where('code', '<=', codeRange.end);
-        }
-        
-        const cptSnapshot = await cptQuery.limit(20).get();
-        
-        if (!cptSnapshot.empty) {
-          cptSnapshot.forEach(doc => {
-            const data = doc.data();
-            
-            if (!data.description) return;
-            
-            const similarity = calculateStringSimilarity(serviceDescription, data.description);
-            
-            if (similarity >= 0.6) {
-              descMatches.push({
-                code: data.code,
-                description: data.description,
-                confidence: similarity,
-                nonFacilityRate: data.nonFacilityRate || null,
-                facilityRate: data.facilityRate || null,
+      const score = calculateMatchScore(normalizedDesc, data.description);
+      if (score >= 0.6) {
+        matches.push({
+          ...data,
+          confidence: score,
+          reasoning: `Matched by description similarity (${Math.round(score * 100)}% match)`
               });
             }
           });
-        }
-      } catch (error) {
-        console.log('[MEDICARE_MATCHER] Error querying cptCodeMappings collection:', error);
-      }
+    
+    // Return best match
+    if (matches.length > 0) {
+      matches.sort((a, b) => b.confidence - a.confidence);
+      return matches[0];
     }
     
-    // Sort matches by confidence and return the best match
-    if (descMatches.length > 0) {
-      descMatches.sort((a, b) => b.confidence - a.confidence);
-      console.log(`[MEDICARE_MATCHER] Found ${descMatches.length} description matches, best match:`, descMatches[0]);
-      return {
-        ...descMatches[0],
-        reasoning: `Matched "${serviceDescription}" to "${descMatches[0].description}" with ${(descMatches[0].confidence * 100).toFixed(0)}% confidence`
-      };
-    }
-    
-    console.log('[MEDICARE_MATCHER] No matches found by description.');
     return null;
   } catch (error) {
     console.error('[MEDICARE_MATCHER] Error finding match by description:', error);
@@ -738,7 +651,40 @@ async function findMatchByDescription(serviceDescription, category) {
   }
 }
 
+/**
+ * Calculate match score between service description and Medicare description
+ * @param {string} serviceDesc - The service description
+ * @param {string} medicareDesc - The Medicare code description
+ * @returns {number} - Match score between 0 and 1
+ */
+function calculateMatchScore(serviceDesc, medicareDesc) {
+  // Important medical terms that should have higher weight
+  const importantTerms = [
+    'evaluation', 'management', 'consultation', 'emergency', 'critical',
+    'comprehensive', 'detailed', 'expanded', 'problem', 'focused',
+    'office', 'outpatient', 'inpatient', 'hospital', 'initial',
+    'subsequent', 'follow', 'established', 'new', 'patient'
+  ];
+  
+  const serviceWords = serviceDesc.split(/\s+/).filter(w => w.length > 2);
+  const medicareWords = medicareDesc.split(/\s+/).filter(w => w.length > 2);
+  
+  let totalWeight = 0;
+  let matchWeight = 0;
+  
+  for (const word of serviceWords) {
+    const weight = importantTerms.includes(word) ? 2 : 1;
+    totalWeight += weight;
+    
+    if (medicareWords.includes(word)) {
+      matchWeight += weight;
+    }
+  }
+  
+  return totalWeight > 0 ? matchWeight / totalWeight : 0;
+}
+
 export {
-  lookupMedicareRate,
-  matchServiceToMedicare
+  matchServiceToMedicare,
+  lookupMedicareRate
 }; 
